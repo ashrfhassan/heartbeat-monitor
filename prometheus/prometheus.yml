@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: node                # -> NODE_EXPORTER_JOB in .env
+    # CPU % is a rate over the heartbeat interval (1m), which needs at least 2 scrapes inside it.
+    # The default 15s gives 4 samples per record, so no special interval is needed here.
+    static_configs:
+      # Each entry is one cluster. The `cluster` label is what the dashboard filters by;
+      # without it the job name is used as the cluster.
+      - targets:
+          - 'node-exporter:9100'
+          - 'node-exporter-2:9100'
+          - 'node-exporter-3:9100'
+          - 'node-exporter-4:9100'
+        labels:
+          cluster: backend
+      - targets:
+          - 'node-exporter-5:9100'
+          - 'node-exporter-6:9100'
+        labels:
+          cluster: workers

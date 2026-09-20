@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Heartbeat Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f4f2; --surface: #fcfcfb; --border: #e2e1dc;
+    --text: #0b0b0b; --text-2: #52514e; --muted: #8a8984; --grid: #ebeae6;
+    --accent: #2a78d6; --series-1: #2a78d6; --series-2: #eb6834;
+    --series-3: #1baf7a; --series-4: #eda100; --series-5: #e87ba4;
+    --series-6: #008300; --series-7: #4a3aa7; --series-8: #e34948;
+    --danger: #c43b3a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #111110; --surface: #1a1a19; --border: #2e2e2c;
+      --text: #ffffff; --text-2: #c3c2b7; --muted: #8f8e86; --grid: #2a2a28;
+      --accent: #3987e5; --series-1: #3987e5; --series-2: #d95926; --danger: #e66767;
+      --series-3: #199e70; --series-4: #c98500; --series-5: #d55181;
+      --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #111110; --surface: #1a1a19; --border: #2e2e2c;
+    --text: #ffffff; --text-2: #c3c2b7; --muted: #8f8e86; --grid: #2a2a28;
+    --accent: #3987e5; --series-1: #3987e5; --series-2: #d95926; --danger: #e66767;
+    --series-3: #199e70; --series-4: #c98500; --series-5: #d55181;
+    --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; }
+  .status { color: var(--text-2); font-size: 13px; }
+  .status.error { color: var(--danger); }
+
+  .filters { margin: 16px 0; padding: 12px; background: var(--surface); border: 1px solid var(--border);
+             border-radius: 10px; display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field span { font-size: 12px; color: var(--text-2); }
+  input, select, button { font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; min-height: 34px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .picker { position: relative; }
+  .picker > button { text-align: left; min-width: 170px; }
+  .panel { position: absolute; top: 100%; left: 0; margin-top: 4px; z-index: 20; min-width: 240px;
+    max-height: 280px; overflow: auto; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .panel .row { display: flex; align-items: center; gap: 8px; padding: 5px 4px; border-radius: 6px; cursor: pointer; }
+  .panel .row:hover { background: var(--bg); }
+  .panel .row input { min-height: 0; }
+  .panel hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
+  .presets { display: flex; gap: 4px; flex-wrap: wrap; }
+  .presets button.active { border-color: var(--accent); color: var(--accent); }
+  .live { display: flex; align-items: center; gap: 6px; color: var(--text-2); min-height: 34px; }
+  .spacer { flex: 1; }
+
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+  .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .kpi .label { color: var(--text-2); font-size: 12px; }
+  .kpi .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .kpi .sub { color: var(--muted); font-size: 12px; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; min-width: 0; }
+  .card.wide { grid-column: 1 / -1; }
+  .card h2 { font-size: 14px; margin: 0 0 2px; }
+  .card p { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+  .chart { position: relative; height: 240px; }
+  .card.wide .chart { height: 280px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
+  .legend i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+
+  details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--text-2); }
+  .table-wrap { max-height: 360px; overflow: auto; margin-top: 8px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; }
+  th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { position: sticky; top: 0; background: var(--surface); color: var(--text-2); font-weight: 500; }
+
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } .spacer { display: none; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Heartbeat dashboard</h1>
+    <div id="status" class="status">Loading…</div>
+  </header>
+
+  <form class="filters" id="filters">
+    <label class="field"><span>From</span><input type="datetime-local" id="from" step="1" required /></label>
+    <label class="field"><span>To</span><input type="datetime-local" id="to" step="1" required /></label>
+    <label class="field"><span>Cluster</span>
+      <select id="cluster"><option value="all">All clusters</option></select>
+    </label>
+    <div class="field picker"><span>Nodes</span>
+      <button type="button" id="nodeButton" aria-expanded="false">All nodes ▾</button>
+      <div class="panel" id="nodePanel" hidden>
+        <label class="row"><input type="checkbox" id="nodeAll" checked /> <b>All nodes</b></label>
+        <div id="nodeList"></div>
+      </div>
+    </div>
+    <button type="submit" class="primary">Apply</button>
+    <div class="spacer"></div>
+    <div class="presets" id="presets">
+      <button type="button" data-min="60">1h</button>
+      <button type="button" data-min="1440">24h</button>
+      <button type="button" data-min="10080">7d</button>
+      <button type="button" data-min="43200">30d</button>
+      <button type="button" data-min="131400">3mo</button>
+      <button type="button" data-min="525600">1y</button>
+    </div>
+    <label class="live"><input type="checkbox" id="live" /> Live (30s)</label>
+  </form>
+
+  <section class="kpis">
+    <div class="kpi"><div class="label">Order requests</div><div class="value" id="k-orders">–</div><div class="sub">total in range</div></div>
+    <div class="kpi"><div class="label">Chats sent</div><div class="value" id="k-chats">–</div><div class="sub">total in range</div></div>
+    <div class="kpi"><div class="label" id="k-cpu-label">Avg CPU</div><div class="value" id="k-cpu">–</div><div class="sub" id="k-cpu-max">peak –</div></div>
+    <div class="kpi"><div class="label" id="k-mem-label">Avg memory</div><div class="value" id="k-mem">–</div><div class="sub" id="k-mem-mb">–</div></div>
+  </section>
+
+  <section class="grid">
+    <div class="card"><h2>Server CPU (%)</h2><p id="cpu-sub">Average per bucket</p><div class="chart"><canvas id="cpuChart"></canvas></div></div>
+    <div class="card"><h2>Server memory used (%)</h2><p id="mem-sub">Average per bucket</p><div class="chart"><canvas id="memChart"></canvas></div></div>
+    <div class="card" id="cpuNodesCard" hidden>
+      <h2>CPU by node (%)</h2><p id="cpu-nodes-sub">One line per node</p>
+      <div class="legend" id="cpuNodesLegend"></div>
+      <div class="chart"><canvas id="cpuNodesChart"></canvas></div>
+    </div>
+    <div class="card" id="memNodesCard" hidden>
+      <h2>Memory by node (%)</h2><p id="mem-nodes-sub">One line per node</p>
+      <div class="legend" id="memNodesLegend"></div>
+      <div class="chart"><canvas id="memNodesChart"></canvas></div>
+    </div>
+
+    <div class="card wide">
+      <h2>Order requests &amp; chats</h2><p id="activity-sub">Count per bucket</p>
+      <div class="legend"><span><i style="background:var(--series-1)"></i>Order requests</span><span><i style="background:var(--series-2)"></i>Chats sent</span></div>
+      <div class="chart"><canvas id="activityChart"></canvas></div>
+    </div>
+  </section>
+
+  <details id="tableView">
+    <summary>Show data table</summary>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Time</th><th>CPU %</th><th>CPU max %</th><th>Memory %</th><th>Memory max %</th><th>Orders</th><th>Chats</th><th>Samples</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table></div>
+  </details>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const nf = new Intl.NumberFormat();
+let BUCKET_LABEL = { '1m': 'minute', '5m': '5 minutes', '15m': '15 minutes', '1h': 'hour', '6h': '6 hours',
+  '1d': 'day', '1w': 'week', '1mo': 'month' };
+// Day/week/month grouping happens in this timezone, so the buckets match the viewer's calendar.
+const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+// 12-hour clock everywhere, whatever the browser's locale would default to.
+const TIME_FMT = { hour: 'numeric', minute: '2-digit', hour12: true };
+const DATETIME_FMT = { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true };
+const CLOCK_FMT = { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true };
+
+let charts = {};
+let lastData = null;
+let liveTimer = null;
+let liveWindowMin = 60;
+
+// ---------- datetime-local helpers (inputs are in the viewer's local time) ----------
+const pad = (n) => String(n).padStart(2, '0');
+function toLocalInput(d) {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+const fromLocalInput = (v) => new Date(v); // parsed as local time
+
+function setRange(minutes) {
+  const to = new Date();
+  const from = new Date(to.getTime() - minutes * 60_000);
+  $('from').value = toLocalInput(from);
+  $('to').value = toLocalInput(to);
+  liveWindowMin = minutes;
+  document.querySelectorAll('#presets button').forEach((b) => b.classList.toggle('active', Number(b.dataset.min) === minutes));
+}
+
+// ---------- data ----------
+let requestId = 0;
+
+async function load() {
+  const myRequest = ++requestId;  // a slow earlier request must not overwrite a newer one
+  const from = fromLocalInput($('from').value);
+  const to = fromLocalInput($('to').value);
+  if (isNaN(from) || isNaN(to) || from >= to) return setStatus('"From" must be before "To"', true);
+
+  // The bucket is always chosen automatically from the range (minute … month).
+  const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString(),
+    bucket: 'auto', tz: TZ, cluster: $('cluster').value, node: selectedNodesParam() });
+  if (selectedNodes.size !== 1) params.set('perNode', '1'); // per-node charts, unless one node is selected
+  setStatus('Loading…');
+  try {
+    const res = await fetch(`/api/heartbeats?${params}`);
+    const data = await res.json();
+    if (myRequest !== requestId) return; // a newer request is already in flight
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    lastData = data;
+    render(data);
+    const note = '';
+    const per = data.bucketLabel ?? BUCKET_LABEL[data.bucket] ?? data.bucket;
+    const who = describeSelection(data.totals.nodeCount);
+    setStatus(`${who} · ${nf.format(data.count)} points · 1 per ${per}${note} · updated ${new Date().toLocaleTimeString([], CLOCK_FMT)}`);
+  } catch (err) {
+    if (myRequest !== requestId) return;
+    setStatus(`Failed to load: ${err.message}`, true);
+  }
+}
+
+function setStatus(text, isError = false) {
+  $('status').textContent = text;
+  $('status').classList.toggle('error', isError);
+}
+
+// ---------- rendering ----------
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+function formatTick(ms, rangeMs, bucket) {
+  const d = new Date(ms);
+  if (bucket === '1mo') return d.toLocaleDateString([], { month: 'short', year: 'numeric' });
+  if (bucket === '1w' || bucket === '1d' || rangeMs > 30 * 86400_000) return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  if (rangeMs <= 2 * 86400_000) return d.toLocaleTimeString([], TIME_FMT);
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], TIME_FMT);
+}
+
+function baseOptions(rangeMs, yTitle, fromMs, toMs, bucket) {
+  const text2 = css('--text-2'), grid = css('--grid'), surface = css('--surface'), text = css('--text'), border = css('--border');
+  return {
+    responsive: true, maintainAspectRatio: false, animation: false, parsing: false, normalized: true,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: surface, titleColor: text, bodyColor: text2, borderColor: border, borderWidth: 1,
+        padding: 10, boxPadding: 4, usePointStyle: true,
+        callbacks: {
+          title: (items) => formatTooltipTitle(items[0].parsed.x, bucket),
+          label: (item) => ` ${item.dataset.label}: ${item.parsed.y == null ? '—' : nf.format(item.parsed.y)}`,
+        },
+      },
+    },
+    scales: {
+      x: { type: 'linear', min: fromMs, max: toMs, grid: { display: false }, border: { color: border },
+           ticks: { color: text2, maxTicksLimit: innerWidth < 600 ? 3 : 7, includeBounds: false, maxRotation: 0,
+                    callback: (v) => formatTick(v, rangeMs, bucket) } },
+      y: { beginAtZero: true, grid: { color: grid }, border: { display: false },
+           ticks: { color: text2, maxTicksLimit: 5 }, title: { display: false, text: yTitle } },
+    },
+  };
+}
+
+// A day/week/month bucket is a period, so label it as one instead of a single timestamp.
+function formatTooltipTitle(ms, bucket) {
+  const d = new Date(ms);
+  if (bucket === '1mo') return d.toLocaleDateString([], { month: 'long', year: 'numeric' });
+  if (bucket === '1w') {
+    const end = new Date(ms + 6 * 86400_000);
+    return `Week of ${d.toLocaleDateString()} – ${end.toLocaleDateString()}`;
+  }
+  if (bucket === '1d') return d.toLocaleDateString([], { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+  return d.toLocaleString([], DATETIME_FMT);
+}
+
+function lineDataset(label, data, color) {
+  return { label, data, borderColor: color, backgroundColor: color, borderWidth: 2, pointRadius: 0,
+           pointHoverRadius: 4, pointHoverBorderWidth: 2, pointHoverBorderColor: css('--surface'),
+           tension: 0.2, spanGaps: false };
+}
+
+function upsertChart(key, canvasId, datasets, options) {
+  if (charts[key]) {
+    charts[key].data.datasets = datasets;
+    charts[key].options = options;
+    charts[key].update('none');
+  } else {
+    charts[key] = new Chart($(canvasId), { type: 'line', data: { datasets }, options });
+  }
+}
+
+// Insert a null point where buckets are missing (collector down, no data) so the line breaks instead of bridging.
+function withGaps(points, bucketMs) {
+  const out = [];
+  for (let i = 0; i < points.length; i++) {
+    if (i && points[i].x - points[i - 1].x > bucketMs * 1.5) {
+      out.push({ x: points[i - 1].x + bucketMs, cpuUsage: null, memoryUsage: null, orders: null, chats: null, gap: true });
+    }
+    out.push(points[i]);
+  }
+  return out;
+}
+
+function render(data) {
+  const fromMs = Date.parse(data.from), toMs = Date.parse(data.to), rangeMs = toMs - fromMs;
+  const pts = withGaps(data.points.map((p) => ({ ...p, x: Date.parse(p.datetime) })), data.bucketMs);
+  const per = BUCKET_LABEL[data.bucket];
+
+  const cpuOpts = baseOptions(rangeMs, '%', fromMs, toMs, data.bucket);
+  cpuOpts.scales.y.suggestedMax = 100;
+  upsertChart('cpu', 'cpuChart', [lineDataset('CPU %', pts.map((p) => ({ x: p.x, y: p.cpuUsage })), css('--series-1'))], cpuOpts);
+  const memOpts = baseOptions(rangeMs, '%', fromMs, toMs, data.bucket);
+  memOpts.scales.y.suggestedMax = 100;
+  upsertChart('mem', 'memChart', [lineDataset('Memory %', pts.map((p) => ({ x: p.x, y: p.memoryUsage })), css('--series-1'))], memOpts);
+  upsertChart('activity', 'activityChart', [
+    lineDataset('Order requests', pts.map((p) => ({ x: p.x, y: p.orders })), css('--series-1')),
+    lineDataset('Chats sent', pts.map((p) => ({ x: p.x, y: p.chats })), css('--series-2')),
+  ], baseOptions(rangeMs, 'count', fromMs, toMs, data.bucket));
+
+  const scope = describeSelection(data.totals.nodeCount, { asAverage: true });
+  $('cpu-sub').textContent = `${scope} · across all cores, per ${per}`;
+  $('mem-sub').textContent = `${scope} · per ${per}`;
+  $('activity-sub').textContent = `Whole cluster · count per ${per}`;
+
+  const t = data.totals;
+  $('k-orders').textContent = nf.format(t.orders);
+  $('k-chats').textContent = nf.format(t.chats);
+  const oneNode = selectedNodes.size === 1;
+  $('k-cpu-label').textContent = oneNode ? 'Avg CPU' : 'Avg CPU (selected nodes)';
+  $('k-mem-label').textContent = oneNode ? 'Avg memory' : 'Avg memory (selected nodes)';
+  $('k-cpu').textContent = t.avgCpuUsage == null ? '–' : `${t.avgCpuUsage}%`;
+  $('k-cpu-max').textContent = `peak ${t.maxCpuUsage == null ? '–' : t.maxCpuUsage + '%'}`;
+  $('k-mem').textContent = t.avgMemoryUsage == null ? '–' : `${t.avgMemoryUsage}%`;
+  $('k-mem-mb').textContent = `peak ${t.maxMemoryUsage == null ? '–' : t.maxMemoryUsage + '%'}`;
+
+  renderNodeCharts(data, rangeMs, fromMs, toMs);
+
+  if ($('tableView').open) renderTable(pts);
+}
+
+const MAX_NODE_LINES = 8; // the palette has 8 distinct hues; beyond that lines stop being tellable apart
+
+// "All nodes" hides which machine is busy, so draw each node as its own line too.
+function renderNodeCharts(data, rangeMs, fromMs, toMs) {
+  const all = data.series ?? [];
+  const show = all.length > 1; // one line on its own says nothing the chart above doesn't
+  $('cpuNodesCard').hidden = !show;
+  $('memNodesCard').hidden = !show;
+  if (!show) return;
+
+  const series = all.slice(0, MAX_NODE_LINES); // already sorted busiest first by the API
+  const hidden = all.length - series.length;
+  const note = hidden > 0 ? ` · busiest ${series.length} of ${all.length} nodes` : '';
+  $('cpu-nodes-sub').textContent = `One line per node${note}`;
+  $('mem-nodes-sub').textContent = `One line per node${note}`;
+
+  const colors = series.map((_, i) => css(`--series-${(i % 8) + 1}`));
+  const legend = series.map((s, i) =>
+    `<span><i style="background:${colors[i]}"></i>${s.node}</span>`).join('');
+  $('cpuNodesLegend').innerHTML = legend;
+  $('memNodesLegend').innerHTML = legend;
+
+  const datasets = (field) => series.map((s, i) => lineDataset(
+    s.node,
+    withGaps(s.points.map((p) => ({ ...p, x: Date.parse(p.datetime) })), data.bucketMs)
+      .map((p) => ({ x: p.x, y: p[field] ?? null })),
+    colors[i],
+  ));
+
+  const opts = () => {
+    const o = baseOptions(rangeMs, '%', fromMs, toMs, data.bucket);
+    o.scales.y.suggestedMax = 100;
+    return o;
+  };
+  upsertChart('cpuNodes', 'cpuNodesChart', datasets('cpuUsage'), opts());
+  upsertChart('memNodes', 'memNodesChart', datasets('memoryUsage'), opts());
+}
+
+function renderTable(pts) {
+  const rows = pts.filter((p) => !p.gap).slice(-500).reverse().map((p) => `<tr><td>${formatTooltipTitle(p.x, lastData?.bucket)}</td>
+    <td>${p.cpuUsage ?? '—'}</td><td>${p.cpuUsageMax ?? '—'}</td><td>${p.memoryUsage ?? '—'}</td><td>${p.memoryUsageMax ?? '—'}</td>
+    <td>${nf.format(p.orders)}</td><td>${nf.format(p.chats)}</td><td>${p.samples}</td></tr>`);
+  $('tbody').innerHTML = rows.join('') || '<tr><td colspan="8">No data in this range</td></tr>';
+}
+
+// ---------- events ----------
+$('filters').addEventListener('submit', (e) => { e.preventDefault(); stopLive(); load(); });
+$('presets').addEventListener('click', (e) => {
+  const min = Number(e.target.dataset?.min);
+  if (!min) return;
+  setRange(min);
+  load();
+});
+['from', 'to'].forEach((id) => $(id).addEventListener('input', () =>
+  document.querySelectorAll('#presets button').forEach((b) => b.classList.remove('active'))));
+
+function stopLive() { $('live').checked = false; clearInterval(liveTimer); liveTimer = null; }
+$('live').addEventListener('change', () => {
+  clearInterval(liveTimer);
+  if (!$('live').checked) return;
+  const tick = () => { setRange(liveWindowMin); load(); };
+  tick();
+  liveTimer = setInterval(tick, 30_000);
+});
+$('tableView').addEventListener('toggle', () => {
+  if ($('tableView').open && lastData) renderTable(lastData.points.map((p) => ({ ...p, x: Date.parse(p.datetime) })));
+});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => lastData && render(lastData));
+
+// Only offer resolutions the heartbeat interval supports (5s heartbeat -> no "1s").
+// ---------- node picker (check any set of nodes; their values are averaged together) ----------
+let knownNodes = [];
+const selectedNodes = new Set(); // empty = every node
+
+const selectedNodesParam = () =>
+  selectedNodes.size === 0 || selectedNodes.size === knownNodes.length ? 'all' : [...selectedNodes].join(',');
+
+// "3 of 5 nodes" for the status line, "Average of 3 selected nodes" above a chart.
+function describeSelection(nodeCount, { asAverage = false } = {}) {
+  const where = $('cluster').value === 'all' ? '' : ` · ${$('cluster').value}`;
+  if (selectedNodes.size === 1) return [...selectedNodes][0] + where;
+  const n = nodeCount || selectedNodes.size || knownNodes.length;
+  const all = !knownNodes.length || n >= knownNodes.length;
+  if (asAverage) return (all ? `Average of ${n} nodes` : `Average of ${n} selected nodes`) + where;
+  return (all ? `All ${n} nodes` : `${n} of ${knownNodes.length} nodes`) + where;
+}
+
+function updateNodeButton() {
+  const chosen = selectedNodes.size;
+  $('nodeButton').textContent =
+    chosen === 0 || chosen === knownNodes.length ? 'All nodes ▾'
+      : chosen === 1 ? `${[...selectedNodes][0]} ▾`
+      : `${chosen} of ${knownNodes.length} nodes ▾`;
+  $('nodeAll').checked = chosen === 0 || chosen === knownNodes.length;
+}
+
+function onNodeToggle(node, checked) {
+  if (checked) selectedNodes.add(node);
+  else selectedNodes.delete(node);
+  if (selectedNodes.size === 0) { // nothing checked means everything, not an empty chart
+    for (const cb of document.querySelectorAll('#nodeList input')) cb.checked = true;
+    knownNodes.forEach((n) => selectedNodes.add(n));
+  }
+  updateNodeButton();
+  load();
+}
+
+// The node list belongs to the chosen cluster, so it is reloaded whenever the cluster changes.
+async function loadNodes() {
+  const cluster = $('cluster').value;
+  const { nodes } = await fetch(`/api/heartbeats/nodes?cluster=${encodeURIComponent(cluster)}`)
+    .then((r) => r.json())
+    .catch(() => ({ nodes: [] }));
+  knownNodes = nodes;
+  selectedNodes.clear();
+  nodes.forEach((n) => selectedNodes.add(n));
+  $('nodeList').innerHTML = nodes.map((n) =>
+    `<label class="row"><input type="checkbox" value="${n}" checked /> ${n}</label>`).join('');
+  for (const cb of document.querySelectorAll('#nodeList input')) {
+    cb.addEventListener('change', () => onNodeToggle(cb.value, cb.checked));
+  }
+  updateNodeButton();
+}
+
+fetch('/api/heartbeats/clusters').then((r) => r.json()).then(({ clusters }) => {
+  for (const c of clusters) $('cluster').add(new Option(c, c));
+}).catch(() => {});
+
+$('cluster').addEventListener('change', async () => {
+  $('nodePanel').hidden = true;
+  await loadNodes();
+  load();
+});
+
+loadNodes();
+
+$('nodeButton').addEventListener('click', () => {
+  const open = $('nodePanel').hidden;
+  $('nodePanel').hidden = !open;
+  $('nodeButton').setAttribute('aria-expanded', String(open));
+});
+$('nodeAll').addEventListener('change', () => {
+  const on = $('nodeAll').checked;
+  selectedNodes.clear();
+  for (const cb of document.querySelectorAll('#nodeList input')) {
+    cb.checked = on;
+    if (on) selectedNodes.add(cb.value);
+  }
+  if (!on) knownNodes.forEach((n) => selectedNodes.add(n)); // unchecking "All" means all again
+  updateNodeButton();
+  load();
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.picker')) $('nodePanel').hidden = true;
+});
+
+setRange(60);
+load();
+</script>
+</body>
+</html>

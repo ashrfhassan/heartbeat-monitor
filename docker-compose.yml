@@ -1,0 +1,42 @@
+services:
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  # LOCAL TESTING ONLY: stands in for the node_exporter on your backend server.
+  # If your real backend server already runs node_exporter, delete this service
+  # and put that server's address in prometheus/prometheus.yml.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    # On Linux, add `pid: host` and mount `/:/host:ro,rslave` with `--path.rootfs=/host`
+    # to report the host machine. Docker Desktop (Windows/macOS) rejects that mount,
+    # so here it reports Docker's own Linux VM — real metrics, just not your Windows host.
+
+  # More of them, so the dashboard has a cluster to switch between.
+  node-exporter-2:
+    image: prom/node-exporter:v1.8.2
+
+  node-exporter-3:
+    image: prom/node-exporter:v1.8.2
+
+  node-exporter-4:
+    image: prom/node-exporter:v1.8.2
+
+  node-exporter-5:
+    image: prom/node-exporter:v1.8.2
+
+  node-exporter-6:
+    image: prom/node-exporter:v1.8.2
+
+volumes:
+  mongo-data:
