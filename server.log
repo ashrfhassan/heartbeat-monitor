@@ -1,5 +1,0 @@
-[db] connected to heartbeat
-[heartbeat] cron "* * * * *" started, each record covers 1 minute(s)
-[api] dashboard on http://localhost:3000
-[heartbeat] 2026-09-21T00:40:00.000Z saved=1 failed=0 nodes=6 [workers/worker-2 cpu=0%, backend/backend-2 cpu=0%, backend/backend-1 cpu=0%, workers/worker-3 cpu=0%, workers/worker-1 cpu=0%, backend/backend-3 cpu=0%] orders=86 chats=382
-[heartbeat] 2026-09-21T00:41:00.000Z saved=2 failed=0 nodes=6 [workers/worker-2 cpu=0%, backend/backend-2 cpu=0%, backend/backend-1 cpu=0%, workers/worker-3 cpu=0%, workers/worker-1 cpu=0%, backend/backend-3 cpu=0%] orders=92 chats=381

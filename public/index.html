@@ -108,6 +108,15 @@
   <form class="filters" id="filters">
     <label class="field"><span>From</span><input type="datetime-local" id="from" step="1" required /></label>
     <label class="field"><span>To</span><input type="datetime-local" id="to" step="1" required /></label>
+    <div class="field"><span>Quick range</span>
+      <div class="presets" id="presets">
+        <button type="button" data-min="60">1h</button>
+        <button type="button" data-min="1440">24h</button>
+        <button type="button" data-min="10080">7d</button>
+        <button type="button" data-min="43200">30d</button>
+        <button type="button" data-min="525600">1y</button>
+      </div>
+    </div>
     <label class="field"><span>Cluster</span>
       <select id="cluster"><option value="all">All clusters</option></select>
     </label>
@@ -120,13 +129,6 @@
     </div>
     <button type="submit" class="primary">Apply</button>
     <div class="spacer"></div>
-    <div class="presets" id="presets">
-      <button type="button" data-min="60">1h</button>
-      <button type="button" data-min="1440">24h</button>
-      <button type="button" data-min="10080">7d</button>
-      <button type="button" data-min="43200">30d</button>
-      <button type="button" data-min="525600">1y</button>
-    </div>
     <label class="live"><input type="checkbox" id="live" /> Live (30s)</label>
     <button type="button" id="syncButton" title="Update stored records when a node's cluster label changed in Prometheus">Sync clusters</button>
   </form>
@@ -366,8 +368,10 @@ function renderNodeCharts(data, rangeMs, fromMs, toMs) {
   const series = all.slice(0, MAX_NODE_LINES); // already sorted busiest first by the API
   const hidden = all.length - series.length;
   const note = hidden > 0 ? ` · busiest ${series.length} of ${all.length} nodes` : '';
-  $('cpu-nodes-sub').textContent = `One line per node${note}`;
-  $('mem-nodes-sub').textContent = `One line per node${note}`;
+  // Same wording as the average charts, so it's clear each point is a bucket, not a single reading.
+  const per = data.bucketLabel ?? BUCKET_LABEL[data.bucket] ?? data.bucket;
+  $('cpu-nodes-sub').textContent = `One line per node · across all cores, average per ${per}${note}`;
+  $('mem-nodes-sub').textContent = `One line per node · average per ${per}${note}`;
 
   const colors = series.map((_, i) => css(`--series-${(i % 8) + 1}`));
   const legend = series.map((s, i) =>
@@ -512,17 +516,12 @@ function onClusterToggle(cluster, checked) {
   load();
 }
 
-fetch('/api/heartbeats/clusters').then((r) => r.json()).then(({ clusters }) => {
-  for (const c of clusters) $('cluster').add(new Option(c, c));
-}).catch(() => {});
 
 $('cluster').addEventListener('change', async () => {
   $('nodePanel').hidden = true;
   await loadNodes();
   load();
 });
-
-loadNodes();
 
 $('nodeButton').addEventListener('click', () => {
   const open = $('nodePanel').hidden;
@@ -582,8 +581,16 @@ $('syncButton').addEventListener('click', async () => {
   }
 });
 
-setRange(60);
-load();
+// Start-up. ?range=<minutes>&cluster=<name> opens a specific view, e.g. /?range=1440&cluster=backend
+(async () => {
+  const params = new URLSearchParams(location.search);
+  const { clusters = [] } = await fetch('/api/heartbeats/clusters').then((r) => r.json()).catch(() => ({}));
+  for (const c of clusters) $('cluster').add(new Option(c, c));
+  if (clusters.includes(params.get('cluster'))) $('cluster').value = params.get('cluster');
+  await loadNodes();
+  setRange(Number(params.get('range')) || 60);
+  load();
+})();
 </script>
 </body>
 </html>
