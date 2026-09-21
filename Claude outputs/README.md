@@ -24,6 +24,7 @@ Those records go into a **MongoDB time-series collection**, and a REST API plus 
 9. [Configuration](#9-configuration)
 10. [Project layout](#10-project-layout)
 11. [Going to production](#11-going-to-production)
+12. [Questions and answers](#12-questions-and-answers)
 
 ---
 
@@ -212,18 +213,37 @@ A cluster is a label on your Prometheus targets. Nothing is hardcoded in this pr
 ```yaml
 - job_name: node
   static_configs:
-    - targets: ['10.0.0.12:9100', '10.0.0.13:9100', '10.0.0.14:9100']
-      labels: { cluster: backend }
-    - targets: ['10.0.1.20:9100', '10.0.1.21:9100']
-      labels: { cluster: workers }
+    # One block per node, so each carries its own name. Setting `instance` overrides the default
+    # (the target address), so records are stored under a friendly, stable name.
+    - targets: ['10.0.0.12:9100']
+      labels: { cluster: backend, instance: backend-1 }
+    - targets: ['10.0.0.13:9100']
+      labels: { cluster: backend, instance: backend-2 }
+    - targets: ['10.0.1.20:9100']
+      labels: { cluster: workers, instance: worker-1 }
 ```
+
+Sharing one block between targets also works when you don't care about names — then `instance` is
+the address, and the nodes appear as `10.0.0.12:9100`.
 
 - A target with no `cluster` label falls back to its **job name**, so a job per cluster works too. `NODE_EXPORTER_JOB` is matched as a regex, so `node|workers` covers several jobs.
 - Nodes are **discovered from the query result**, not from a list. `avg by (instance, job, cluster)` returns one series per node, and the collector writes whatever came back.
 - `NODE_EXPORTER_INSTANCE` narrows everything to a single machine when set.
 - Removing a node needs nothing either: its records simply stop. It stays in the picker for 7 days, then its history expires with the retention window.
 
-**One thing to plan for:** the stored node name is Prometheus's `instance` label — the target address. If a node's IP or port changes, it counts as a new node and its history splits. Use hostnames in `prometheus.yml`, or attach a stable label per target.
+**Naming matters.** The stored node name is Prometheus's `instance` label. Left at its default, that's the target address, so an IP or port change looks like a brand-new node and the history splits. Setting `instance` to a stable name (`backend-1`) avoids that: the address can change freely underneath it.
+
+**Renaming later** takes two steps — change `prometheus.yml` for new records, then rewrite the old ones:
+
+```js
+db.heartbeats.updateMany({ "meta.node": "10.0.0.12:9100" }, { $set: { "meta.node": "backend-1" } })
+```
+
+Two MongoDB rules to know here: an update on a time-series collection can only filter by the
+`metaField`, so you cannot scope a rename to a time range — it rewrites that node's whole history.
+And during Prometheus's 5-minute lookback both names report, so a few minutes end up with two
+records for the same node and minute. Harmless (their values are near-identical and the average
+absorbs them), but if you want none, relabel, wait 5 minutes, then rename.
 
 ---
 
@@ -297,7 +317,22 @@ Clusters that reported in the last 7 days.
 
 ### `GET /api/heartbeats/nodes?cluster=backend`
 
-Nodes that reported in the last 7 days, optionally within one cluster. The 7-day window means a node that is briefly down doesn't disappear from the picker.
+Nodes that reported in the last 7 days, optionally within one cluster. Returns `groups` (`[{ cluster, nodes }]`, which is how the picker groups them) and a flat `nodes` list. The 7-day window means a node that is briefly down doesn't disappear from the picker.
+
+### `GET /api/maintenance/cluster-drift` · `POST /api/maintenance/sync-clusters`
+
+Behind the dashboard's **Sync clusters** button. The GET reports which nodes report a different
+cluster in Prometheus than the one stored on their old records; the POST rewrites those records
+(`meta.cluster`) so a node's history follows it to its new cluster.
+
+The POST re-scans rather than trusting the request, so it can only ever set a cluster Prometheus is
+reporting right now. Only the **cluster** can be synced this way: a node is matched by its address,
+so if the address itself changed, Prometheus has no way to say which old node it used to be and
+those records are left alone — rename them by hand if you want the history joined up:
+
+```js
+db.heartbeats.updateMany({ "meta.node": "10.0.0.12:9100" }, { $set: { "meta.node": "orders-api-1:9100" } })
+```
 
 ### `GET /api/heartbeats/latest?limit=60`
 
@@ -317,9 +352,11 @@ The grouping options with the heartbeat interval and timezone; and a liveness ch
 
 - **From / To** — native date-time pickers, in your own timezone, sent to the API as UTC
 - **Cluster** — all clusters, or one; changing it reloads the node list
-- **Nodes** — a checkbox list; tick any set and the charts average just those. The button shows *All nodes*, *3 of 5 nodes*, or the node's name. Unticking everything means all of them again
+- **Nodes** — a checkbox list grouped by cluster: each cluster is a heading whose checkbox ticks all of its nodes (half-ticked when only some are). Tick any set and the charts average just those. The button shows *All nodes*, *3 of 5 nodes*, or the node's name. Unticking everything means all of them again
 - **Presets** — 1h, 24h, 7d, 30d, 1y
 - **Live (30s)** — re-queries on a rolling window
+- **Sync clusters** — after you move a node to another cluster in `prometheus.yml`, this shows what
+  changed and updates the stored history to match, so old records follow the node
 
 **Charts**
 
@@ -414,6 +451,120 @@ Everything lives in `.env` (see `.env.example`).
 - **One collector.** The heartbeat lives inside the API process. With several replicas, run it in exactly one: `RUN_COLLECTOR=false` on the others, or a dedicated worker.
 - **Scrape interval.** The CPU window needs 2+ scrapes. 15s is ideal; slower than 30s means a longer heartbeat.
 - **First record after a restart.** If Prometheus has fewer than two samples in the window, `rate()` returns nothing and that record's `cpuUsage` is `null`. The next one is fine.
+- **After relabeling.** Click **Sync clusters** in the dashboard (or `POST /api/maintenance/sync-clusters`) so old records follow the node to its new cluster. Wait out Prometheus's 5-minute lookback first; the scan already prefers the freshest series (`timestamp(up{…})`), but the collector may still write a few records under the old label during the overlap.
 - **Relabeling a live cluster.** Prometheus keeps returning the old series for ~5 minutes (its lookback window), so you may briefly get records under both the old and new names. Wait it out before seeding.
 - **Security.** node_exporter has no authentication — let only Prometheus reach port 9100.
 - **Long-term history.** Raw records expire after `RETENTION_DAYS`. For years of data, write hourly or daily rollups into a normal collection with a scheduled `$merge` and keep those forever.
+
+---
+
+## 12. Questions and answers
+
+Collected from the design discussions behind this project.
+
+### Storage
+
+**Which database suits this kind of data?**
+
+A time-series database. At one record per node per minute you accumulate hundreds of thousands of
+rows a month, and a plain table handles that badly. The realistic options were TimescaleDB
+(PostgreSQL) and MongoDB time-series collections; this project uses MongoDB because the chat side
+of the system already runs on it, so it adds no new infrastructure. InfluxDB fits if you only ever
+store metrics, and ClickHouse only makes sense at millions of events per second.
+
+**Is that a special MongoDB, or the normal one?**
+
+The normal one — MongoDB 6.0+, same driver, same Mongoose. A *time-series collection* is only a
+collection type: records are grouped into compressed buckets by `meta` and time, an automatic TTL
+expires old data, and range queries stay fast. What you give up is flexibility after creation:
+`timeField`, `metaField` and `granularity` are fixed, and updates or deletes can only filter by the
+`metaField`.
+
+**Is the dashboard API just querying the time-series collection?**
+
+Yes — it never touches Prometheus. Each request runs one `$match` plus one `$group` with
+`$dateTrunc` and returns at most ~1,500 points. That separation is the point of storing the data:
+Prometheus answers "what is happening now" and keeps ~15 days, while this collection keeps the
+per-minute history *alongside the business counts*, so you can ask "orders and CPU for last March,
+grouped by day" — a question Prometheus cannot answer, because it has no idea what an order is.
+
+### Collection and timing
+
+**Does the backend expose an API to Prometheus, or does this service read node_exporter directly?**
+
+Neither. Your app exposes nothing. **node_exporter** runs on each node and serves the kernel's raw
+counters; **Prometheus pulls** them every 15s and stores them; the **collector asks Prometheus**
+once a minute. Reading node_exporter directly is possible, but then you would parse the text
+format, keep the previous reading in memory, handle counter resets, and lose all of it on restart —
+Prometheus already does that and keeps the history.
+
+**Is it a cron job that reads every cluster and node every minute?**
+
+Yes, and it does not loop over nodes. One `node-cron` job fires at the top of each minute and makes
+four calls in parallel: two PromQL queries and two database counts. The queries group
+`by (instance, job, cluster)`, so **one** response carries every node of every cluster. Prometheus
+does the fan-out to individual machines, on its own 15s schedule. Adding nodes costs nothing here —
+the same two queries simply return more rows.
+
+**Can the heartbeat run every second?**
+
+No. CPU usage is a *rate*, measurable only between two readings, and Prometheus needs at least two
+scrapes inside the window. A one-minute heartbeat fits the standard 15s scrape with four samples
+per record. The trade-off: a 10-second spike is averaged across the whole minute, so it appears
+about a sixth of its real height.
+
+### What the numbers mean
+
+**Does a record mean the CPU used 71% of its capacity and memory 60% of its capacity in that
+minute?**
+
+Yes, with two refinements. **CPU** is 71% of the node's *total* capacity — averaged across all
+cores, so 100% means every core saturated (unlike `top`, which shows 400% for four busy cores). It
+covers every process on that machine, and anything not idle counts, including iowait and steal. It
+also hides the distribution: 50% could be all cores half-busy or one core pegged.
+
+**Memory** is 60% of physical RAM (`MemTotal`), measured as a snapshot at the end of the minute
+rather than an average. Swap is not counted. "Used" means unreclaimable — file cache is excluded,
+which is why a healthy busy server reads 40% rather than 95%.
+
+**Why did a test record show 2% CPU with 90 orders, and 51% with 86 orders?**
+
+Because in that test the orders came from the simulator — random numbers that run no code — while
+the 51% came from a program deliberately loading one core during that exact minute. The two columns
+were unrelated on purpose: a known load at a known minute is what proves the record's window lines
+up. On a real server the two correlate, but never simply: 90 orders might cost 5% or 60% depending
+on what those requests do.
+
+### Operations
+
+**Can I add a node, or a whole new cluster, without breaking anything?**
+
+Yes. `meta` is just a value, so a new node or cluster starts new buckets — no migration, no
+restart, no code change. Demonstrated live: a sixth node appeared in the dashboard one minute after
+being added to `prometheus.yml`. Removing one needs nothing either; its records stop, it stays in
+the picker for 7 days, and its history expires with the retention window. The only case needing a
+restart is a new cluster in a *different Prometheus job*, since `NODE_EXPORTER_JOB` is read at
+startup.
+
+**Can I rename a node or a cluster?**
+
+Yes, in two steps: change `prometheus.yml` so new records use the new name, then optionally rewrite
+the old records so the history joins up.
+
+```js
+db.heartbeats.updateMany({ "meta.node": "10.0.0.12:9100" }, { $set: { "meta.node": "backend-1" } })
+```
+
+Skip the second step and nothing breaks — you simply get two entries in the picker, old and new.
+Remember that a time-series update can only filter by the `metaField`, so a rename always rewrites
+that node's whole history, and that Prometheus's 5-minute lookback can leave a few minutes with a
+record under each name.
+
+**Can a button in the dashboard do that rewrite for me?**
+
+For clusters, yes — that is the **Sync clusters** button. It compares each node's cluster in
+Prometheus with the cluster stored on its records, shows the differences, and rewrites them on
+confirmation. It cannot do node renames: a node is matched by its address, so if the address itself
+changed, Prometheus has no way to say which old node it used to be. Those you rename by hand with
+the command above.
+
