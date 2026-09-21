@@ -364,6 +364,8 @@ The grouping options with the heartbeat interval and timezone; and a liveness ch
 |---|---|
 | Server CPU (%) | Average across the selected nodes |
 | Server memory used (%) | Same, for memory |
+| CPU with orders & chats | The CPU average again; hovering a point also shows that bucket's orders and chats |
+| Memory with orders & chats | Same, for memory |
 | CPU by node (%) | One line per node, busiest first |
 | Memory by node (%) | Same, for memory |
 | Order requests & chats | Counts per bucket, always system-wide |

@@ -209,6 +209,18 @@
   <section class="grid">
     <div class="card"><h2>Server CPU (%)</h2><p id="cpu-sub">Average per bucket</p><div class="chart"><canvas id="cpuChart"></canvas></div></div>
     <div class="card"><h2>Server memory used (%)</h2><p id="mem-sub">Average per bucket</p><div class="chart"><canvas id="memChart"></canvas></div></div>
+
+    <!-- Load next to traffic: the line is the server metric, the tooltip adds the orders and
+         chats of the same bucket, so a peak can be read against the traffic that caused it. -->
+    <div class="card">
+      <h2>CPU with orders &amp; chats</h2><p id="cpu-traffic-sub">Hover a point for orders and chats</p>
+      <div class="chart"><canvas id="cpuTrafficChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Memory with orders &amp; chats</h2><p id="mem-traffic-sub">Hover a point for orders and chats</p>
+      <div class="chart"><canvas id="memTrafficChart"></canvas></div>
+    </div>
+
     <div class="card" id="cpuNodesCard" hidden>
       <h2>CPU by node (%)</h2><p id="cpu-nodes-sub">One line per node</p>
       <div class="legend" id="cpuNodesLegend"></div>
@@ -417,7 +429,28 @@ function render(data) {
     lineDataset('Chats sent', pts.map((p) => ({ x: p.x, y: p.chats })), css('--series-2')),
   ], baseOptions(rangeMs, 'count', fromMs, toMs, data.bucket));
 
+  // CPU / memory with the traffic of the same bucket in the tooltip. One line and one axis:
+  // the orders and chats ride along on each point instead of being drawn on a second scale.
+  const withTraffic = (field, label) => {
+    const o = baseOptions(rangeMs, '%', fromMs, toMs, data.bucket);
+    o.scales.y.suggestedMax = 100;
+    o.plugins.tooltip.callbacks.label = (item) =>
+      ` ${label}: ${item.parsed.y == null ? '—' : nf.format(item.parsed.y) + '%'}`;
+    o.plugins.tooltip.callbacks.afterLabel = (item) => (item.raw.orders == null ? '' : [
+      `  Orders: ${nf.format(item.raw.orders)}`,
+      `  Chats: ${nf.format(item.raw.chats)}`,
+    ]);
+    return o;
+  };
+  const trafficPoints = (field) => pts.map((p) => ({ x: p.x, y: p[field], orders: p.orders, chats: p.chats }));
+  upsertChart('cpuTraffic', 'cpuTrafficChart',
+    [lineDataset('CPU', trafficPoints('cpuUsage'), css('--series-1'))], withTraffic('cpuUsage', 'CPU'));
+  upsertChart('memTraffic', 'memTrafficChart',
+    [lineDataset('Memory', trafficPoints('memoryUsage'), css('--series-1'))], withTraffic('memoryUsage', 'Memory'));
+
   const scope = describeSelection(data.totals.nodeCount, { asAverage: true });
+  $('cpu-traffic-sub').textContent = `${scope} · per ${per} · hover a point for orders and chats`;
+  $('mem-traffic-sub').textContent = `${scope} · per ${per} · hover a point for orders and chats`;
   $('cpu-sub').textContent = `${scope} · across all cores, per ${per}`;
   $('mem-sub').textContent = `${scope} · per ${per}`;
   $('activity-sub').textContent = `Whole cluster · count per ${per}`;
