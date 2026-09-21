@@ -64,6 +64,10 @@
   .live { display: flex; align-items: center; gap: 6px; color: var(--text-2); min-height: 34px; }
   .spacer { flex: 1; }
 
+  .sync { margin: 0 0 10px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; font-size: 13px; }
+  .sync ul { margin: 6px 0; padding-left: 18px; }
+  .sync .actions { display: flex; gap: 8px; margin-top: 8px; }
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
   .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
   .kpi .label { color: var(--text-2); font-size: 12px; }
@@ -121,7 +125,10 @@
       <button type="button" data-min="525600">1y</button>
     </div>
     <label class="live"><input type="checkbox" id="live" /> Live (30s)</label>
+    <button type="button" id="syncButton" title="Update stored records when a node's cluster label changed in Prometheus">Sync clusters</button>
   </form>
+
+  <div class="sync" id="syncBox" hidden></div>
 
   <section class="kpis">
     <div class="kpi"><div class="label">Order requests</div><div class="value" id="k-orders">–</div><div class="sub">total in range</div></div>
@@ -497,6 +504,44 @@ $('nodeAll').addEventListener('change', () => {
 });
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.picker')) $('nodePanel').hidden = true;
+});
+
+// ---------- sync stored records with Prometheus ----------
+// Only the cluster label can be synced: if a node's ADDRESS changed, Prometheus cannot say which
+// old node it used to be, so those records are left as they are.
+const showSync = (html) => { $('syncBox').innerHTML = html; $('syncBox').hidden = false; };
+
+$('syncButton').addEventListener('click', async () => {
+  showSync('Scanning Prometheus…');
+  try {
+    const { changes, liveNodes } = await fetch('/api/maintenance/cluster-drift').then((r) => r.json());
+    if (!changes.length) {
+      showSync(`<b>Nothing to sync.</b> All ${liveNodes} nodes reporting to Prometheus already match their stored records.`);
+      return;
+    }
+    const list = changes.map((c) =>
+      `<li><code>${c.node}</code>: ${c.from} → <b>${c.to}</b> (${nf.format(c.records)} records)</li>`).join('');
+    showSync(`<b>${changes.length} node(s) changed cluster in Prometheus.</b><ul>${list}</ul>
+      <div class="actions"><button type="button" id="syncApply" class="primary">Update records</button>
+      <button type="button" id="syncCancel">Cancel</button></div>`);
+
+    $('syncCancel').addEventListener('click', () => { $('syncBox').hidden = true; });
+    $('syncApply').addEventListener('click', async () => {
+      showSync('Updating records…');
+      const { applied, totalModified } = await fetch('/api/maintenance/sync-clusters', { method: 'POST' })
+        .then((r) => r.json());
+      const done = applied.map((a) => `<li><code>${a.node}</code>: ${a.from} → <b>${a.to}</b> — ${nf.format(a.modified)} records</li>`).join('');
+      showSync(`<b>Updated ${nf.format(totalModified)} records.</b><ul>${done}</ul>`);
+      $('cluster').length = 1; // rebuild the cluster list, then reload everything
+      await fetch('/api/heartbeats/clusters').then((r) => r.json())
+        .then(({ clusters }) => clusters.forEach((c) => $('cluster').add(new Option(c, c))))
+        .catch(() => {});
+      await loadNodes();
+      load();
+    });
+  } catch (err) {
+    showSync(`Sync failed: ${err.message}`);
+  }
 });
 
 setRange(60);

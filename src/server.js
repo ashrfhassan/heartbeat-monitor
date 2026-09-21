@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { connectDb, disconnectDb } from './db.js';
 import { router as heartbeatsRouter, availableBuckets, BUCKET_LABELS } from './routes/heartbeats.js';
+import { router as maintenanceRouter } from './routes/maintenance.js';
 import { startCollector } from './services/collector.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -22,6 +23,7 @@ async function main() {
     }),
   );
   app.use('/api/heartbeats', heartbeatsRouter);
+  app.use('/api/maintenance', maintenanceRouter);
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
   app.use((err, _req, res, _next) => {

@@ -212,18 +212,37 @@ A cluster is a label on your Prometheus targets. Nothing is hardcoded in this pr
 ```yaml
 - job_name: node
   static_configs:
-    - targets: ['10.0.0.12:9100', '10.0.0.13:9100', '10.0.0.14:9100']
-      labels: { cluster: backend }
-    - targets: ['10.0.1.20:9100', '10.0.1.21:9100']
-      labels: { cluster: workers }
+    # One block per node, so each carries its own name. Setting `instance` overrides the default
+    # (the target address), so records are stored under a friendly, stable name.
+    - targets: ['10.0.0.12:9100']
+      labels: { cluster: backend, instance: backend-1 }
+    - targets: ['10.0.0.13:9100']
+      labels: { cluster: backend, instance: backend-2 }
+    - targets: ['10.0.1.20:9100']
+      labels: { cluster: workers, instance: worker-1 }
 ```
+
+Sharing one block between targets also works when you don't care about names — then `instance` is
+the address, and the nodes appear as `10.0.0.12:9100`.
 
 - A target with no `cluster` label falls back to its **job name**, so a job per cluster works too. `NODE_EXPORTER_JOB` is matched as a regex, so `node|workers` covers several jobs.
 - Nodes are **discovered from the query result**, not from a list. `avg by (instance, job, cluster)` returns one series per node, and the collector writes whatever came back.
 - `NODE_EXPORTER_INSTANCE` narrows everything to a single machine when set.
 - Removing a node needs nothing either: its records simply stop. It stays in the picker for 7 days, then its history expires with the retention window.
 
-**One thing to plan for:** the stored node name is Prometheus's `instance` label — the target address. If a node's IP or port changes, it counts as a new node and its history splits. Use hostnames in `prometheus.yml`, or attach a stable label per target.
+**Naming matters.** The stored node name is Prometheus's `instance` label. Left at its default, that's the target address, so an IP or port change looks like a brand-new node and the history splits. Setting `instance` to a stable name (`backend-1`) avoids that: the address can change freely underneath it.
+
+**Renaming later** takes two steps — change `prometheus.yml` for new records, then rewrite the old ones:
+
+```js
+db.heartbeats.updateMany({ "meta.node": "10.0.0.12:9100" }, { $set: { "meta.node": "backend-1" } })
+```
+
+Two MongoDB rules to know here: an update on a time-series collection can only filter by the
+`metaField`, so you cannot scope a rename to a time range — it rewrites that node's whole history.
+And during Prometheus's 5-minute lookback both names report, so a few minutes end up with two
+records for the same node and minute. Harmless (their values are near-identical and the average
+absorbs them), but if you want none, relabel, wait 5 minutes, then rename.
 
 ---
 
@@ -299,6 +318,21 @@ Clusters that reported in the last 7 days.
 
 Nodes that reported in the last 7 days, optionally within one cluster. The 7-day window means a node that is briefly down doesn't disappear from the picker.
 
+### `GET /api/maintenance/cluster-drift` · `POST /api/maintenance/sync-clusters`
+
+Behind the dashboard's **Sync clusters** button. The GET reports which nodes report a different
+cluster in Prometheus than the one stored on their old records; the POST rewrites those records
+(`meta.cluster`) so a node's history follows it to its new cluster.
+
+The POST re-scans rather than trusting the request, so it can only ever set a cluster Prometheus is
+reporting right now. Only the **cluster** can be synced this way: a node is matched by its address,
+so if the address itself changed, Prometheus has no way to say which old node it used to be and
+those records are left alone — rename them by hand if you want the history joined up:
+
+```js
+db.heartbeats.updateMany({ "meta.node": "10.0.0.12:9100" }, { $set: { "meta.node": "orders-api-1:9100" } })
+```
+
 ### `GET /api/heartbeats/latest?limit=60`
 
 The last N raw records, oldest first, exactly as stored.
@@ -320,6 +354,8 @@ The grouping options with the heartbeat interval and timezone; and a liveness ch
 - **Nodes** — a checkbox list; tick any set and the charts average just those. The button shows *All nodes*, *3 of 5 nodes*, or the node's name. Unticking everything means all of them again
 - **Presets** — 1h, 24h, 7d, 30d, 1y
 - **Live (30s)** — re-queries on a rolling window
+- **Sync clusters** — after you move a node to another cluster in `prometheus.yml`, this shows what
+  changed and updates the stored history to match, so old records follow the node
 
 **Charts**
 
@@ -414,6 +450,7 @@ Everything lives in `.env` (see `.env.example`).
 - **One collector.** The heartbeat lives inside the API process. With several replicas, run it in exactly one: `RUN_COLLECTOR=false` on the others, or a dedicated worker.
 - **Scrape interval.** The CPU window needs 2+ scrapes. 15s is ideal; slower than 30s means a longer heartbeat.
 - **First record after a restart.** If Prometheus has fewer than two samples in the window, `rate()` returns nothing and that record's `cpuUsage` is `null`. The next one is fine.
+- **After relabeling.** Click **Sync clusters** in the dashboard (or `POST /api/maintenance/sync-clusters`) so old records follow the node to its new cluster. Wait out Prometheus's 5-minute lookback first; the scan already prefers the freshest series (`timestamp(up{…})`), but the collector may still write a few records under the old label during the overlap.
 - **Relabeling a live cluster.** Prometheus keeps returning the old series for ~5 minutes (its lookback window), so you may briefly get records under both the old and new names. Wait it out before seeding.
 - **Security.** node_exporter has no authentication — let only Prometheus reach port 9100.
 - **Long-term history.** Raw records expire after `RETENTION_DAYS`. For years of data, write hourly or daily rollups into a normal collection with a scheduled `$merge` and keep those forever.

@@ -6,17 +6,19 @@ scrape_configs:
     # CPU % is a rate over the heartbeat interval (1m), which needs at least 2 scrapes inside it.
     # The default 15s gives 4 samples per record, so no special interval is needed here.
     static_configs:
-      # Each entry is one cluster. The `cluster` label is what the dashboard filters by;
-      # without it the job name is used as the cluster.
-      - targets:
-          - 'node-exporter:9100'
-          - 'node-exporter-2:9100'
-          - 'node-exporter-3:9100'
-          - 'node-exporter-4:9100'
-        labels:
-          cluster: backend
-      - targets:
-          - 'node-exporter-5:9100'
-          - 'node-exporter-6:9100'
-        labels:
-          cluster: workers
+      # One block per node so each can carry its own `instance` label. Setting `instance` here
+      # overrides the default (the target address), so records are stored under a friendly, stable
+      # name — an IP or port change then no longer looks like a brand-new node.
+      # `cluster` is what the dashboard's Cluster filter uses.
+      - targets: ['node-exporter:9100']
+        labels: { cluster: backend, instance: backend-1 }
+      - targets: ['node-exporter-2:9100']
+        labels: { cluster: backend, instance: backend-2 }
+      - targets: ['node-exporter-3:9100']
+        labels: { cluster: backend, instance: backend-3 }
+      - targets: ['node-exporter-4:9100']
+        labels: { cluster: workers, instance: worker-1 }
+      - targets: ['node-exporter-5:9100']
+        labels: { cluster: workers, instance: worker-2 }
+      - targets: ['node-exporter-6:9100']
+        labels: { cluster: workers, instance: worker-3 }
