@@ -58,6 +58,9 @@
   .panel .row { display: flex; align-items: center; gap: 8px; padding: 5px 4px; border-radius: 6px; cursor: pointer; }
   .panel .row:hover { background: var(--bg); }
   .panel .row input { min-height: 0; }
+  .panel .cluster-row { margin-top: 4px; color: var(--text-2); font-size: 12px;
+    text-transform: uppercase; letter-spacing: .04em; }
+  .panel .cluster-row + .row, .panel .node-row { padding-left: 22px; }
   .panel hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
   .presets { display: flex; gap: 4px; flex-wrap: wrap; }
   .presets button.active { border-color: var(--accent); color: var(--accent); }
@@ -422,6 +425,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => last
 // Only offer resolutions the heartbeat interval supports (5s heartbeat -> no "1s").
 // ---------- node picker (check any set of nodes; their values are averaged together) ----------
 let knownNodes = [];
+let nodeGroups = []; // [{ cluster, nodes: [...] }]
 const selectedNodes = new Set(); // empty = every node
 
 const selectedNodesParam = () =>
@@ -438,6 +442,13 @@ function describeSelection(nodeCount, { asAverage = false } = {}) {
 }
 
 function updateNodeButton() {
+  for (const cb of document.querySelectorAll('#nodeList input[data-cluster]')) {
+    const group = nodeGroups.find((g) => g.cluster === cb.dataset.cluster);
+    const picked = group ? group.nodes.filter((n) => selectedNodes.has(n)).length : 0;
+    cb.checked = group && picked === group.nodes.length;
+    cb.indeterminate = picked > 0 && picked < (group?.nodes.length ?? 0);
+  }
+
   const chosen = selectedNodes.size;
   $('nodeButton').textContent =
     chosen === 0 || chosen === knownNodes.length ? 'All nodes ▾'
@@ -460,18 +471,45 @@ function onNodeToggle(node, checked) {
 // The node list belongs to the chosen cluster, so it is reloaded whenever the cluster changes.
 async function loadNodes() {
   const cluster = $('cluster').value;
-  const { nodes } = await fetch(`/api/heartbeats/nodes?cluster=${encodeURIComponent(cluster)}`)
+  const { groups = [], nodes = [] } = await fetch(`/api/heartbeats/nodes?cluster=${encodeURIComponent(cluster)}`)
     .then((r) => r.json())
-    .catch(() => ({ nodes: [] }));
+    .catch(() => ({}));
   knownNodes = nodes;
+  nodeGroups = groups;
   selectedNodes.clear();
   nodes.forEach((n) => selectedNodes.add(n));
-  $('nodeList').innerHTML = nodes.map((n) =>
-    `<label class="row"><input type="checkbox" value="${n}" checked /> ${n}</label>`).join('');
-  for (const cb of document.querySelectorAll('#nodeList input')) {
+
+  // Nodes are listed under their cluster, with the cluster row ticking its own nodes.
+  $('nodeList').innerHTML = groups.map((g) => `
+    <label class="row cluster-row"><input type="checkbox" data-cluster="${g.cluster}" checked /> ${g.cluster}</label>
+    ${g.nodes.map((n) => `<label class="row node-row"><input type="checkbox" value="${n}" checked /> ${n}</label>`).join('')}
+  `).join('');
+
+  for (const cb of document.querySelectorAll('#nodeList input[value]')) {
     cb.addEventListener('change', () => onNodeToggle(cb.value, cb.checked));
   }
+  for (const cb of document.querySelectorAll('#nodeList input[data-cluster]')) {
+    cb.addEventListener('change', () => onClusterToggle(cb.dataset.cluster, cb.checked));
+  }
   updateNodeButton();
+}
+
+// Ticking a cluster row ticks every node under it.
+function onClusterToggle(cluster, checked) {
+  const group = nodeGroups.find((g) => g.cluster === cluster);
+  if (!group) return;
+  for (const node of group.nodes) {
+    const cb = document.querySelector(`#nodeList input[value="${node}"]`);
+    if (cb) cb.checked = checked;
+    if (checked) selectedNodes.add(node);
+    else selectedNodes.delete(node);
+  }
+  if (selectedNodes.size === 0) { // an empty selection means all of them, not an empty chart
+    for (const cb of document.querySelectorAll('#nodeList input')) cb.checked = true;
+    knownNodes.forEach((n) => selectedNodes.add(n));
+  }
+  updateNodeButton();
+  load();
 }
 
 fetch('/api/heartbeats/clusters').then((r) => r.json()).then(({ clusters }) => {
@@ -496,7 +534,7 @@ $('nodeAll').addEventListener('change', () => {
   selectedNodes.clear();
   for (const cb of document.querySelectorAll('#nodeList input')) {
     cb.checked = on;
-    if (on) selectedNodes.add(cb.value);
+    if (on && cb.value) selectedNodes.add(cb.value);
   }
   if (!on) knownNodes.forEach((n) => selectedNodes.add(n)); // unchecking "All" means all again
   updateNodeButton();

@@ -192,10 +192,26 @@ router.get('/', async (req, res, next) => {
 router.get('/nodes', async (req, res, next) => {
   try {
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const filter = { datetime: { $gte: since } };
-    if (req.query.cluster && req.query.cluster !== 'all') filter['meta.cluster'] = String(req.query.cluster);
-    const nodes = await Heartbeat.distinct('meta.node', filter);
-    res.json({ nodes: nodes.filter((n) => n !== CLUSTER_NODE).sort() });
+    const match = { datetime: { $gte: since }, 'meta.node': { $ne: CLUSTER_NODE } };
+    if (req.query.cluster && req.query.cluster !== 'all') match['meta.cluster'] = String(req.query.cluster);
+
+    // The pairs, so the picker can group the nodes under their cluster.
+    const pairs = await Heartbeat.aggregate([
+      { $match: match },
+      { $group: { _id: { cluster: '$meta.cluster', node: '$meta.node' } } },
+      { $sort: { '_id.cluster': 1, '_id.node': 1 } },
+    ]);
+
+    const byCluster = new Map();
+    for (const { _id } of pairs) {
+      if (!byCluster.has(_id.cluster)) byCluster.set(_id.cluster, []);
+      byCluster.get(_id.cluster).push(_id.node);
+    }
+    const groups = [...byCluster].map(([cluster, nodes]) => ({ cluster, nodes }));
+    res.json({
+      groups,
+      nodes: groups.flatMap((g) => g.nodes).sort(), // flat list, for callers that don't group
+    });
   } catch (err) {
     next(err);
   }

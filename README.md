@@ -316,7 +316,7 @@ Clusters that reported in the last 7 days.
 
 ### `GET /api/heartbeats/nodes?cluster=backend`
 
-Nodes that reported in the last 7 days, optionally within one cluster. The 7-day window means a node that is briefly down doesn't disappear from the picker.
+Nodes that reported in the last 7 days, optionally within one cluster. Returns `groups` (`[{ cluster, nodes }]`, which is how the picker groups them) and a flat `nodes` list. The 7-day window means a node that is briefly down doesn't disappear from the picker.
 
 ### `GET /api/maintenance/cluster-drift` · `POST /api/maintenance/sync-clusters`
 
@@ -351,7 +351,7 @@ The grouping options with the heartbeat interval and timezone; and a liveness ch
 
 - **From / To** — native date-time pickers, in your own timezone, sent to the API as UTC
 - **Cluster** — all clusters, or one; changing it reloads the node list
-- **Nodes** — a checkbox list; tick any set and the charts average just those. The button shows *All nodes*, *3 of 5 nodes*, or the node's name. Unticking everything means all of them again
+- **Nodes** — a checkbox list grouped by cluster: each cluster is a heading whose checkbox ticks all of its nodes (half-ticked when only some are). Tick any set and the charts average just those. The button shows *All nodes*, *3 of 5 nodes*, or the node's name. Unticking everything means all of them again
 - **Presets** — 1h, 24h, 7d, 30d, 1y
 - **Live (30s)** — re-queries on a rolling window
 - **Sync clusters** — after you move a node to another cluster in `prometheus.yml`, this shows what
