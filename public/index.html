@@ -42,8 +42,31 @@
   .status { color: var(--text-2); font-size: 13px; }
   .status.error { color: var(--danger); }
 
-  .filters { margin: 16px 0; padding: 12px; background: var(--surface); border: 1px solid var(--border);
-             border-radius: 10px; display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+  .filters { position: relative; margin: 16px 0; padding: 12px; background: var(--surface);
+             border: 1px solid var(--border); border-radius: 10px;
+             display: flex; flex-direction: column; gap: 12px; }
+  .filter-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+  .filter-actions { padding-top: 12px; border-top: 1px solid var(--border); }
+  .filter-actions { align-items: center; }
+  .filter-actions .primary { min-width: 120px; }
+  /* Apply stands out while the form differs from what the charts show */
+  .filter-actions .primary.dirty { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
+  .apply-hint { color: var(--text-2); font-size: 12.5px; }
+  .apply-hint::before { content: '●'; color: var(--accent); margin-right: 6px; }
+  .live.corner { position: absolute; top: 10px; right: 12px; min-height: 0; }
+  .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .header-right .status { margin-right: 4px; }
+  /* info tooltip next to Sync clusters — shows on hover and on keyboard focus */
+  .tip { position: relative; display: inline-flex; }
+  .tip-icon { width: 22px; height: 22px; min-height: 0; padding: 0; border-radius: 50%;
+    font: italic 600 12px/1 Georgia, serif; color: var(--text-2); cursor: help; }
+  .tip-text { position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; width: 320px;
+    padding: 10px 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); font-size: 12.5px; line-height: 1.5;
+    visibility: hidden; opacity: 0; transition: opacity .12s; }
+  .tip-text code { font-size: 11.5px; }
+  .tip-text .tip-note { display: block; margin-top: 6px; color: var(--muted); }
+  .tip:hover .tip-text, .tip:focus-within .tip-text { visibility: visible; opacity: 1; }
   .field { display: flex; flex-direction: column; gap: 4px; }
   .field span { font-size: 12px; color: var(--text-2); }
   input, select, button { font: inherit; color: var(--text); background: var(--bg);
@@ -63,9 +86,19 @@
   .panel .cluster-row + .row, .panel .node-row { padding-left: 22px; }
   .panel hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
   .presets { display: flex; gap: 4px; flex-wrap: wrap; }
+  .timeframe { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 0; min-width: 0;
+    padding: 6px 12px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+  .timeframe legend { padding: 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text-2); }
+  .tf-or { align-self: stretch; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px; color: var(--muted); font-size: 12px; padding: 0 2px; }
+  .tf-or::before, .tf-or::after { content: ''; flex: 1; width: 1px; background: var(--border); }
+  @media (max-width: 760px) {
+    .tf-or { flex-direction: row; width: 100%; align-self: auto; }
+    .tf-or::before, .tf-or::after { height: 1px; width: auto; }
+  }
   .presets button.active { border-color: var(--accent); color: var(--accent); }
   .live { display: flex; align-items: center; gap: 6px; color: var(--text-2); min-height: 34px; }
-  .spacer { flex: 1; }
 
   .sync { margin: 0 0 10px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border);
     border-radius: 10px; font-size: 13px; }
@@ -95,42 +128,73 @@
   th:first-child, td:first-child { text-align: left; }
   th { position: sticky; top: 0; background: var(--surface); color: var(--text-2); font-weight: 500; }
 
-  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } .spacer { display: none; } }
+  @media (max-width: 760px) {
+    .grid { grid-template-columns: 1fr; }
+    .filters { padding-top: 40px; } /* room for the Live corner */
+  }
 </style>
 </head>
 <body>
 <main>
   <header>
     <h1>Heartbeat dashboard</h1>
-    <div id="status" class="status">Loading…</div>
+    <div class="header-right">
+      <div id="status" class="status">Loading…</div>
+      <button type="button" id="syncButton" aria-describedby="syncTip">Sync clusters</button>
+      <span class="tip">
+        <button type="button" class="tip-icon" aria-label="What does Sync clusters do?" aria-describedby="syncTip">i</button>
+        <span class="tip-text" role="tooltip" id="syncTip">
+          <b>Moved a node to another cluster?</b><br />
+          After you change a node's <code>cluster</code> label in <code>prometheus.yml</code>, its old records
+          still carry the old cluster. This scans Prometheus, lists the nodes whose cluster changed and how many
+          records each has, and — once you confirm — updates those records so the node's history follows it.<br />
+          <span class="tip-note">It never renames nodes: if a node's address changed, that stays a manual step.</span>
+        </span>
+      </span>
+    </div>
   </header>
 
   <form class="filters" id="filters">
-    <label class="field"><span>From</span><input type="datetime-local" id="from" step="1" required /></label>
-    <label class="field"><span>To</span><input type="datetime-local" id="to" step="1" required /></label>
-    <div class="field"><span>Quick range</span>
-      <div class="presets" id="presets">
-        <button type="button" data-min="60">1h</button>
-        <button type="button" data-min="1440">24h</button>
-        <button type="button" data-min="10080">7d</button>
-        <button type="button" data-min="43200">30d</button>
-        <button type="button" data-min="525600">1y</button>
+    <label class="live corner"><input type="checkbox" id="live" /> Live (30s)</label>
+
+    <!-- Row 1 — the time range: either pick exact dates, or use a quick range. -->
+    <div class="filter-row">
+      <fieldset class="timeframe">
+        <legend>Time range</legend>
+        <label class="field"><span>From</span><input type="datetime-local" id="from" step="1" required /></label>
+        <label class="field"><span>To</span><input type="datetime-local" id="to" step="1" required /></label>
+        <div class="tf-or" aria-hidden="true"><span>or</span></div>
+        <div class="field"><span>Quick range</span>
+          <div class="presets" id="presets">
+            <button type="button" data-min="60">1h</button>
+            <button type="button" data-min="1440">24h</button>
+            <button type="button" data-min="10080">7d</button>
+            <button type="button" data-min="43200">30d</button>
+            <button type="button" data-min="525600">1y</button>
+          </div>
+        </div>
+      </fieldset>
+    </div>
+
+    <!-- Row 2 — which machines. -->
+    <div class="filter-row">
+      <label class="field"><span>Cluster</span>
+        <select id="cluster"><option value="all">All clusters</option></select>
+      </label>
+      <div class="field picker"><span>Nodes</span>
+        <button type="button" id="nodeButton" aria-expanded="false">All nodes ▾</button>
+        <div class="panel" id="nodePanel" hidden>
+          <label class="row"><input type="checkbox" id="nodeAll" checked /> <b>All nodes</b></label>
+          <div id="nodeList"></div>
+        </div>
       </div>
     </div>
-    <label class="field"><span>Cluster</span>
-      <select id="cluster"><option value="all">All clusters</option></select>
-    </label>
-    <div class="field picker"><span>Nodes</span>
-      <button type="button" id="nodeButton" aria-expanded="false">All nodes ▾</button>
-      <div class="panel" id="nodePanel" hidden>
-        <label class="row"><input type="checkbox" id="nodeAll" checked /> <b>All nodes</b></label>
-        <div id="nodeList"></div>
-      </div>
+
+    <!-- Row 3 — apply everything above. -->
+    <div class="filter-row filter-actions">
+      <button type="submit" class="primary" id="applyButton">Apply</button>
+      <span class="apply-hint" id="applyHint" hidden>Changes not applied yet</span>
     </div>
-    <button type="submit" class="primary">Apply</button>
-    <div class="spacer"></div>
-    <label class="live"><input type="checkbox" id="live" /> Live (30s)</label>
-    <button type="button" id="syncButton" title="Update stored records when a node's cluster label changed in Prometheus">Sync clusters</button>
   </form>
 
   <div class="sync" id="syncBox" hidden></div>
@@ -208,8 +272,27 @@ function setRange(minutes) {
 // ---------- data ----------
 let requestId = 0;
 
+// Every control only edits the form; nothing reaches the charts until Apply calls load().
+// These hold what the charts currently show, so labels don't change while you edit the form.
+let appliedNodes = new Set();
+let appliedCluster = 'all';
+let appliedKnown = [];
+
+function markDirty() {
+  $('applyButton').classList.add('dirty');
+  $('applyHint').hidden = false;
+}
+function markClean() {
+  $('applyButton').classList.remove('dirty');
+  $('applyHint').hidden = true;
+}
+
 async function load() {
   const myRequest = ++requestId;  // a slow earlier request must not overwrite a newer one
+  appliedNodes = new Set(selectedNodes);
+  appliedCluster = $('cluster').value;
+  appliedKnown = [...knownNodes];
+  markClean();
   const from = fromLocalInput($('from').value);
   const to = fromLocalInput($('to').value);
   if (isNaN(from) || isNaN(to) || from >= to) return setStatus('"From" must be before "To"', true);
@@ -342,7 +425,7 @@ function render(data) {
   const t = data.totals;
   $('k-orders').textContent = nf.format(t.orders);
   $('k-chats').textContent = nf.format(t.chats);
-  const oneNode = selectedNodes.size === 1;
+  const oneNode = appliedNodes.size === 1;
   $('k-cpu-label').textContent = oneNode ? 'Avg CPU' : 'Avg CPU (selected nodes)';
   $('k-mem-label').textContent = oneNode ? 'Avg memory' : 'Avg memory (selected nodes)';
   $('k-cpu').textContent = t.avgCpuUsage == null ? '–' : `${t.avgCpuUsage}%`;
@@ -407,11 +490,13 @@ $('filters').addEventListener('submit', (e) => { e.preventDefault(); stopLive();
 $('presets').addEventListener('click', (e) => {
   const min = Number(e.target.dataset?.min);
   if (!min) return;
-  setRange(min);
-  load();
+  setRange(min);   // fills From/To; the charts update on Apply
+  markDirty();
 });
-['from', 'to'].forEach((id) => $(id).addEventListener('input', () =>
-  document.querySelectorAll('#presets button').forEach((b) => b.classList.remove('active'))));
+['from', 'to'].forEach((id) => $(id).addEventListener('input', () => {
+  document.querySelectorAll('#presets button').forEach((b) => b.classList.remove('active'));
+  markDirty();
+}));
 
 function stopLive() { $('live').checked = false; clearInterval(liveTimer); liveTimer = null; }
 $('live').addEventListener('change', () => {
@@ -437,12 +522,12 @@ const selectedNodesParam = () =>
 
 // "3 of 5 nodes" for the status line, "Average of 3 selected nodes" above a chart.
 function describeSelection(nodeCount, { asAverage = false } = {}) {
-  const where = $('cluster').value === 'all' ? '' : ` · ${$('cluster').value}`;
-  if (selectedNodes.size === 1) return [...selectedNodes][0] + where;
-  const n = nodeCount || selectedNodes.size || knownNodes.length;
-  const all = !knownNodes.length || n >= knownNodes.length;
+  const where = appliedCluster === 'all' ? '' : ` · ${appliedCluster}`;
+  if (appliedNodes.size === 1) return [...appliedNodes][0] + where;
+  const n = nodeCount || appliedNodes.size || appliedKnown.length;
+  const all = !appliedKnown.length || n >= appliedKnown.length;
   if (asAverage) return (all ? `Average of ${n} nodes` : `Average of ${n} selected nodes`) + where;
-  return (all ? `All ${n} nodes` : `${n} of ${knownNodes.length} nodes`) + where;
+  return (all ? `All ${n} nodes` : `${n} of ${appliedKnown.length} nodes`) + where;
 }
 
 function updateNodeButton() {
@@ -469,7 +554,7 @@ function onNodeToggle(node, checked) {
     knownNodes.forEach((n) => selectedNodes.add(n));
   }
   updateNodeButton();
-  load();
+  markDirty();
 }
 
 // The node list belongs to the chosen cluster, so it is reloaded whenever the cluster changes.
@@ -513,14 +598,14 @@ function onClusterToggle(cluster, checked) {
     knownNodes.forEach((n) => selectedNodes.add(n));
   }
   updateNodeButton();
-  load();
+  markDirty();
 }
 
 
 $('cluster').addEventListener('change', async () => {
   $('nodePanel').hidden = true;
-  await loadNodes();
-  load();
+  await loadNodes();   // the node list follows the cluster straight away; the charts wait for Apply
+  markDirty();
 });
 
 $('nodeButton').addEventListener('click', () => {
@@ -537,7 +622,7 @@ $('nodeAll').addEventListener('change', () => {
   }
   if (!on) knownNodes.forEach((n) => selectedNodes.add(n)); // unchecking "All" means all again
   updateNodeButton();
-  load();
+  markDirty();
 });
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.picker')) $('nodePanel').hidden = true;

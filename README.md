@@ -348,7 +348,7 @@ The grouping options with the heartbeat interval and timezone; and a liveness ch
 
 `public/index.html` — one self-contained page, no build step, Chart.js from a CDN.
 
-**Controls**
+**Controls** — every control only edits the form; nothing reaches the charts until you click **Apply** (a dot and *Changes not applied yet* show while the form differs from what's on screen).
 
 - **From / To** — native date-time pickers, in your own timezone, sent to the API as UTC
 - **Cluster** — all clusters, or one; changing it reloads the node list
