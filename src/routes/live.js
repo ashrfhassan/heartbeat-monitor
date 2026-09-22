@@ -15,6 +15,7 @@ const round2 = (v) => (v == null ? null : Math.round(v * 100) / 100);
  *   CPU    = busy cores / all cores      (a 32-core node counts more than a 4-core one)
  *   memory = used bytes / total bytes
  *   disk   = free bytes / total bytes
+ *   network = busier direction (in or out) / bandwidth (in and out each get the full bandwidth)
  */
 router.get('/', async (req, res) => {
   const cluster = String(req.query.cluster || 'all');
@@ -35,6 +36,14 @@ router.get('/', async (req, res) => {
     const cores = sum(withCpu, (n) => n.cpu.cores);
     const memTotal = sum(withMem, (n) => n.memory.totalBytes);
     const memUsed = sum(withMem, (n) => n.memory.usedBytes);
+    // Network: add the nodes up. Usage = the busier total direction ÷ the total bandwidth of the nodes
+    // that report one (a node without a known speed is still counted in the throughput).
+    const withNet = nodes.filter((n) => n.network.rxBps != null || n.network.txBps != null);
+    const withSpeed = withNet.filter((n) => n.network.speedBps);
+    const netRx = sum(withNet, (n) => n.network.rxBps ?? 0);
+    const netTx = sum(withNet, (n) => n.network.txBps ?? 0);
+    const speed = sum(withSpeed, (n) => n.network.speedBps);
+    const busiest = Math.max(sum(withSpeed, (n) => n.network.rxBps ?? 0), sum(withSpeed, (n) => n.network.txBps ?? 0));
 
     res.json({
       at: new Date().toISOString(),
@@ -45,6 +54,12 @@ router.get('/', async (req, res) => {
         cpu: { usage: cores ? round2(sum(withCpu, (n) => (n.cpu.usage * n.cpu.cores) / 100) / cores * 100) : null, cores },
         memory: { usage: memTotal ? round2((memUsed / memTotal) * 100) : null, usedBytes: memUsed, totalBytes: memTotal },
         disk: { availBytes: sum(withDisk, (n) => n.disk.availBytes), sizeBytes: sum(withDisk, (n) => n.disk.sizeBytes) },
+        network: {
+          rxBps: withNet.length ? netRx : null,
+          txBps: withNet.length ? netTx : null,
+          speedBps: speed || null,
+          usage: speed ? Math.round((busiest / speed) * 100 * 10000) / 10000 : null,
+        },
       },
       errors,
     });

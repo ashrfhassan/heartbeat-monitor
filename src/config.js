@@ -26,6 +26,11 @@ if (intervalMs < 60_000 || intervalMs % 60_000 !== 0) {
 // Prometheus needs at least 2 scrapes inside the window (1m window -> the usual 15s scrape is fine).
 const rateWindow = process.env.CPU_RATE_WINDOW || `${intervalMs / 60_000}m`;
 
+// Network interfaces left out of the throughput sum: loopback and the virtual ones Docker/Kubernetes
+// create (veth…, docker0, br-…, cni0, flannel, calico…), which would count the same bytes twice.
+const netDeviceExclude = process.env.NETWORK_DEVICE_EXCLUDE ||
+  'lo|veth.*|docker.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|vxlan.*|tunl.*|kube-.*';
+
 // Which filesystem the "Disk free" tile reports. '/' is the root disk on a normal Linux server.
 const diskMountpoint = process.env.DISK_MOUNTPOINT || '/';
 
@@ -45,6 +50,19 @@ export const config = {
     memoryUsage:
       process.env.MEMORY_PERCENT_QUERY ||
       `100 * (1 - node_memory_MemAvailable_bytes{${selector}} / node_memory_MemTotal_bytes{${selector}})`,
+    // Network throughput in bits per second, summed over the node's real interfaces and averaged over
+    // the same window as CPU, so each record's number covers the same minute as its orders/chats.
+    netRx:
+      process.env.NETWORK_RX_QUERY ||
+      `8 * sum by (instance, job, cluster) (rate(node_network_receive_bytes_total{${selector},device!~"${netDeviceExclude}"}[${rateWindow}]))`,
+    netTx:
+      process.env.NETWORK_TX_QUERY ||
+      `8 * sum by (instance, job, cluster) (rate(node_network_transmit_bytes_total{${selector},device!~"${netDeviceExclude}"}[${rateWindow}]))`,
+    // A node's bandwidth (the most it can carry) in bits per second, summed over the same interfaces as the throughput. Virtual NICs
+    // sometimes report -1 or nothing; those are dropped (> 0) and the node's usage % shows as unknown.
+    netSpeed:
+      process.env.NETWORK_SPEED_QUERY ||
+      `8 * sum by (instance, job, cluster) (node_network_speed_bytes{${selector},device!~"${netDeviceExclude}"} > 0)`,
     // Live tiles: memory in bytes and the number of cores, so the dashboard can show "used / total"
     // and weight a multi-node average by each node's size.
     memTotal: `node_memory_MemTotal_bytes{${selector}}`,
@@ -74,5 +92,6 @@ export const config = {
   intervalMs,
   rateWindow,
   diskMountpoint,
+  netDeviceExclude,
   retentionDays: num(process.env.RETENTION_DAYS, 30),
 };

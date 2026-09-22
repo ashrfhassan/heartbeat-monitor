@@ -119,6 +119,37 @@ router.get('/', async (req, res, next) => {
       },
     ]);
 
+    // Network throughput of the selection = the SUM of its nodes (unlike CPU/memory, which average).
+    // Step 1 adds the nodes up for every minute; step 2 averages those minute totals over the bucket,
+    // so a 15-minute point is the average total throughput in those 15 minutes, not 15 minutes added up.
+    // Minutes recorded before network was collected have no value and are left out (not counted as 0).
+    const network = await Heartbeat.aggregate([
+      { $match: { datetime: match.datetime, $and: [...scope, { 'meta.node': { $ne: CLUSTER_NODE } }] } },
+      {
+        $group: {
+          _id: '$datetime',
+          rx: { $sum: '$netRxBps' },
+          tx: { $sum: '$netTxBps' },
+          reported: { $sum: { $cond: [{ $isNumber: '$netRxBps' }, 1, 0] } },
+        },
+      },
+      { $match: { reported: { $gt: 0 } } },
+      {
+        $group: {
+          _id: { $dateTrunc: { ...dateTrunc, date: '$_id' } },
+          rx: { $avg: '$rx' }, tx: { $avg: '$tx' }, rxMax: { $max: '$rx' }, txMax: { $max: '$tx' },
+        },
+      },
+    ]);
+    const netByBucket = new Map(network.map((n) => [n._id.getTime(), n]));
+    for (const p of points) {
+      const n = netByBucket.get(p.datetime.getTime());
+      p.netRxBps = n ? Math.round(n.rx) : null; // average total bits/s received in the bucket
+      p.netTxBps = n ? Math.round(n.tx) : null;
+      p.netRxBpsMax = n ? Math.round(n.rxMax) : null; // busiest minute in the bucket
+      p.netTxBpsMax = n ? Math.round(n.txMax) : null;
+    }
+
     // One series per node, for the per-node charts. Cluster records are excluded: they hold no CPU.
     const series = req.query.perNode === '1' || req.query.perNode === 'true'
       ? await Heartbeat.aggregate([
@@ -134,6 +165,8 @@ router.get('/', async (req, res, next) => {
               _id: { bucket: { $dateTrunc: dateTrunc }, node: '$meta.node', cluster: '$meta.cluster' },
               cpuUsage: { $avg: '$cpuUsage' },
               memoryUsage: { $avg: '$memoryUsage' },
+              netRxBps: { $avg: '$netRxBps' }, // this node's average throughput in the bucket
+              netTxBps: { $avg: '$netTxBps' },
             },
           },
           { $sort: { '_id.bucket': 1 } },
@@ -147,6 +180,8 @@ router.get('/', async (req, res, next) => {
                   datetime: '$_id.bucket',
                   cpuUsage: { $round: ['$cpuUsage', 2] },
                   memoryUsage: { $round: ['$memoryUsage', 2] },
+                  netRxBps: { $round: ['$netRxBps', 0] },
+                  netTxBps: { $round: ['$netTxBps', 0] },
                 },
               },
             },

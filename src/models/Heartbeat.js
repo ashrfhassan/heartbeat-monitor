@@ -26,6 +26,8 @@ const HeartbeatSchema = new mongoose.Schema(
     },
     cpuUsage: { type: Number, min: 0, max: 100, default: null }, // % of this node's CPU in use
     memoryUsage: { type: Number, min: 0, max: 100, default: null }, // % of this node's RAM in use
+    netRxBps: { type: Number, min: 0, default: null }, // network received, bits per second (avg over the minute)
+    netTxBps: { type: Number, min: 0, default: null }, // network sent, bits per second (avg over the minute)
     orders: { type: Number, min: 0, default: null }, // order requests in the minute, system-wide
     chats: { type: Number, min: 0, default: null }, // chats sent in the minute, system-wide
   },

@@ -74,7 +74,7 @@ const task = cron.schedule(cronExpression, () => {          // '* * * * *'
 Three details that matter:
 
 - **Snapping to the boundary.** Cron fires a few milliseconds late, so the timestamp is rounded to the exact minute. Records always land on `:00`, never drifting.
-- **Everything runs in parallel.** Two PromQL queries and two database counts go out together; the slowest one sets the pace. If one fails, only its field is saved as `null`, so a Prometheus hiccup never costs you the order counts.
+- **Everything runs in parallel.** Four PromQL queries (CPU, memory, network in, network out) and two database counts go out together; the slowest one sets the pace. If one fails, only its field is saved as `null`, so a Prometheus hiccup never costs you the order counts.
 - **Runs are independent.** A slow minute doesn't delay the next one.
 
 ### Why a minute, and not a second
@@ -141,6 +141,30 @@ It uses **MemAvailable**, not MemFree. Linux fills spare RAM with file cache and
 
 Unlike CPU, this is a **snapshot** at the end of the minute, not an average. Memory moves slowly, so that's fine.
 
+### Network throughput
+
+```
+node_network_receive_bytes_total{device="eth0"}    counter: every byte received since boot
+node_network_transmit_bytes_total{device="eth0"}   counter: every byte sent since boot
+
+netRxBps = 8 × sum over interfaces of rate(receive_bytes[1m])    → bits per second received
+netTxBps = 8 × sum over interfaces of rate(transmit_bytes[1m])   → bits per second sent
+```
+
+Like CPU, these are counters, so `rate()` turns them into an **average speed over the minute** —
+the same minute as the record's orders and chats. Bytes × 8 gives bits, the unit network speeds are
+quoted in (a 1 Gbps node moves at most ≈ 125 MB/s). A node's number is the sum of its real interfaces;
+loopback (`lo`) and the virtual interfaces Docker and Kubernetes create (`veth…`, `docker0`, `br-…`,
+`cni0`, `flannel`, `calico`…) are left out, because they would count the same bytes twice. Change
+the list with `NETWORK_DEVICE_EXCLUDE`. Throughput is stored in whole bits per second.
+
+**The server's throughput is the sum of its nodes**, not the average: if three nodes each send
+10 Mbps, the server sends 30 Mbps. (CPU and memory are percentages of each node, so those average.)
+
+In the docker-compose demo each node-exporter container has its own network interface, so unlike
+CPU and memory, each demo node reports its own traffic — mostly Prometheus scraping it, a few
+hundred bits per second.
+
 ### Disk free
 
 ```
@@ -178,10 +202,10 @@ Percentages are stored with two decimals (71.384 → 71.38), and the API's avera
 One record per node per minute, plus one counts record per minute. A 4-node cluster writes 5 records a minute:
 
 ```json
-{ "datetime": "…T14:05:00Z", "meta": { "cluster": "backend", "node": "10.0.0.12:9100" }, "cpuUsage": 71.38, "memoryUsage": 60.12, "orders": null, "chats": null }
-{ "datetime": "…T14:05:00Z", "meta": { "cluster": "backend", "node": "10.0.0.13:9100" }, "cpuUsage": 44, "memoryUsage": 58, "orders": null, "chats": null }
-{ "datetime": "…T14:05:00Z", "meta": { "cluster": "workers", "node": "10.0.1.20:9100" }, "cpuUsage": 39, "memoryUsage": 61, "orders": null, "chats": null }
-{ "datetime": "…T14:05:00Z", "meta": { "cluster": "__cluster__", "node": "__cluster__" }, "cpuUsage": null, "memoryUsage": null, "orders": 100, "chats": 500 }
+{ "datetime": "…T14:05:00Z", "meta": { "cluster": "backend", "node": "10.0.0.12:9100" }, "cpuUsage": 71.38, "memoryUsage": 60.12, "netRxBps": 18400000, "netTxBps": 52100000, "orders": null, "chats": null }
+{ "datetime": "…T14:05:00Z", "meta": { "cluster": "backend", "node": "10.0.0.13:9100" }, "cpuUsage": 44, "memoryUsage": 58, "netRxBps": 9800000, "netTxBps": 21000000, "orders": null, "chats": null }
+{ "datetime": "…T14:05:00Z", "meta": { "cluster": "workers", "node": "10.0.1.20:9100" }, "cpuUsage": 39, "memoryUsage": 61, "netRxBps": 2100000, "netTxBps": 900000, "orders": null, "chats": null }
+{ "datetime": "…T14:05:00Z", "meta": { "cluster": "__cluster__", "node": "__cluster__" }, "cpuUsage": null, "memoryUsage": null, "netRxBps": null, "netTxBps": null, "orders": 100, "chats": 500 }
 ```
 
 | Field | Type | Meaning |
@@ -191,6 +215,8 @@ One record per node per minute, plus one counts record per minute. A 4-node clus
 | `meta.node` | String | The node_exporter target, e.g. `10.0.0.12:9100`; `__cluster__` on the counts record |
 | `cpuUsage` | Number 0–100 | Average % of that node's CPU used during the minute |
 | `memoryUsage` | Number 0–100 | % of that node's RAM in use at the end of the minute |
+| `netRxBps` | Number | Network received by that node, bits per second, averaged over the minute |
+| `netTxBps` | Number | Network sent by that node, bits per second, averaged over the minute |
 | `orders` | Number | Order requests in that minute, system-wide |
 | `chats` | Number | Chats sent in that minute, system-wide |
 
@@ -300,13 +326,17 @@ curl "http://localhost:3000/api/heartbeats?from=2026-09-17T08:00:00Z&to=2026-09-
               "avgMemoryUsage": 58.4, "maxMemoryUsage": 60, "samples": 60, "nodeCount": 4 },
   "points": [
     { "datetime": "2026-09-17T08:00:00.000Z", "cpuUsage": 30.1, "cpuUsageMax": 41,
-      "memoryUsage": 58.2, "memoryUsageMax": 59, "orders": 311, "chats": 1290,
-      "samples": 1, "nodeCount": 4 }
+      "memoryUsage": 58.2, "memoryUsageMax": 59,
+      "netRxBps": 30300000, "netTxBps": 74000000, "netRxBpsMax": 30300000, "netTxBpsMax": 74000000,
+      "orders": 311, "chats": 1290, "samples": 1, "nodeCount": 4 }
   ]
 }
 ```
 
 Inside a point: `cpuUsage` / `memoryUsage` are averaged across the selected nodes and across the bucket, `…Max` is the highest single record, `orders` / `chats` are summed, `samples` counts the heartbeats, and `nodeCount` is how many nodes contributed.
+`netRxBps` / `netTxBps` are the selected nodes' throughput **added up** for each minute and then averaged over the bucket;
+`netRxBpsMax` / `netTxBpsMax` are the busiest minute's total. Minutes saved before network collection started have no
+network value and are skipped rather than counted as zero.
 
 **How the filtering works.** The counts record must survive every filter, or the order totals would vanish whenever you pick a node. So the match is:
 
@@ -323,7 +353,7 @@ Adds a second result set, from its own aggregation:
 ```json
 "series": [
   { "node": "10.0.0.12:9100", "cluster": "backend", "avgCpuUsage": 44.2, "avgMemoryUsage": 82.2,
-    "points": [ { "datetime": "…", "cpuUsage": 45.1, "memoryUsage": 82 } ] }
+    "points": [ { "datetime": "…", "cpuUsage": 45.1, "memoryUsage": 82, "netRxBps": 18400000, "netTxBps": 52100000 } ] }
 ]
 ```
 
@@ -352,7 +382,7 @@ db.heartbeats.updateMany({ "meta.node": "10.0.0.12:9100" }, { $set: { "meta.node
 
 ### `GET /api/live?cluster=backend&node=backend-1,backend-2`
 
-The **Avg CPU**, **Avg memory** and **Disk free** tiles and their pop-ups. Everything is read from
+The **Avg CPU**, **Avg memory**, **Disk free** and **Bandwidth used** tiles and their pop-ups. Everything is read from
 Prometheus at the moment of the call — nothing comes from the database, and there are no dates.
 Same `cluster` and `node` filters as `/api/heartbeats`.
 
@@ -365,12 +395,14 @@ Same `cluster` and `node` filters as `/api/heartbeats`.
     { "cluster": "backend", "node": "backend-1",
       "cpu":    { "usage": 14.5, "cores": 8 },
       "memory": { "usage": 31.25, "usedBytes": 5368709120, "totalBytes": 17179869184 },
-      "disk":   { "availBytes": 53687091200, "sizeBytes": 85899345920 } }
+      "disk":   { "availBytes": 53687091200, "sizeBytes": 85899345920 },
+      "network": { "rxBps": 180000000, "txBps": 4100000000, "speedBps": 10000000000, "usage": 41 } }
   ],
   "totals": {
     "cpu":    { "usage": 33.6, "cores": 36 },
     "memory": { "usage": 33.17, "usedBytes": 37580963840, "totalBytes": 111669149696 },
-    "disk":   { "availBytes": 404800667648, "sizeBytes": 816043786240 }
+    "disk":   { "availBytes": 404800667648, "sizeBytes": 816043786240 },
+    "network": { "rxBps": 237102341, "txBps": 5052008800, "speedBps": 21000000000, "usage": 24.05 }
   },
   "errors": []
 }
@@ -378,11 +410,15 @@ Same `cluster` and `node` filters as `/api/heartbeats`.
 
 - **CPU** is the average over the last `cpuWindow` (the heartbeat interval, 1 minute by default) —
   CPU is a rate, so "right now" always means "over the last few seconds or minutes".
-- **Totals are weighted by size**, the same way for all three: CPU = busy cores ÷ all cores, memory
-  = used bytes ÷ total bytes, disk = free bytes ÷ total bytes. A 32-core node moves the total more
+- **Totals are weighted by size**, the same way for all of them: CPU = busy cores ÷ all cores, memory
+  = used bytes ÷ total bytes, disk = free bytes ÷ total bytes, network = busier direction ÷ bandwidth. A 32-core node moves the total more
   than a 4-core one. (The charts, which come from the stored records, average the nodes equally;
   with identical nodes the two are the same.)
-- The six queries run in parallel and each settles on its own; a failed one is listed in `errors`
+- **Network usage** uses the busier direction: in and out each get the node's full bandwidth, so a
+  10 Gbps node sending 4 Gbps and receiving 1 Gbps is 40% used, and it is maxed out when either side
+  is. A node's bandwidth is `node_network_speed_bytes` × 8 (`speedBps`); virtual machines that don't
+  report one give `speedBps: null` and `usage: null`, while their throughput is still counted.
+- The nine queries run in parallel and each settles on its own; a failed one is listed in `errors`
   and only its fields are `null`. `502` if Prometheus can't be reached at all.
 
 ### `GET /api/heartbeats/latest?limit=60`
@@ -417,8 +453,9 @@ The grouping options with the heartbeat interval and timezone; and a liveness ch
 | Avg CPU | Prometheus, live | CPU busy right now (last minute) across the applied nodes |
 | Avg memory | Prometheus, live | Memory in use right now across the applied nodes |
 | Disk free | Prometheus, live | Free/total right now, e.g. *50 GB/80 GB* |
+| Bandwidth used | Prometheus, live | Busier direction (in or out) right now out of the nodes' total bandwidth, e.g. *5.1 Gbps/21 Gbps* |
 
-The three live tiles ignore From/To: they follow only the applied cluster and nodes, and are read
+The four live tiles ignore From/To: they follow only the applied cluster and nodes, and are read
 again on every **Apply** (and every 30 s with **Live** on). With one node they show that node; with
 several, a size-weighted total (see [`/api/live`](#6-the-api)).
 
@@ -428,6 +465,7 @@ cluster, with a *Total* row:
 - **CPU by node** — cores and usage
 - **Memory by node** — used, total and usage
 - **Disk space by node** — free, used, total and usage
+- **Bandwidth by node** — received, sent, bandwidth and usage (busier direction ÷ bandwidth); the *i* next to its title shows a short table: bandwidth (the most the node can send and receive per second, each direction) vs throughput (what's actually flowing)
 
 Bars turn amber at 80% and red at 90% (with *high* / *low* next to the number). Opening a pop-up
 reads Prometheus again, and its **Refresh** button re-reads it on demand — the tiles update too.
@@ -441,13 +479,16 @@ For CPU and memory **over time**, use the charts below the tiles — they come f
 |---|---|
 | Server CPU (%) | Average across the selected nodes |
 | Server memory used (%) | Same, for memory |
+| Server network throughput | Received and sent, the **sum** of the selected nodes, averaged per bucket (auto units: bps → Kbps → Mbps → Gbps). With buckets longer than a minute the tooltip also shows the busiest minute |
 | CPU with orders & chats | The CPU average again; hovering a point also shows that bucket's orders and chats |
 | Memory with orders & chats | Same, for memory |
 | CPU by node (%) | One line per node, busiest first |
 | Memory by node (%) | Same, for memory |
+| Network received by node | One line per node, that node's average throughput in (bits per second) per bucket |
+| Network sent by node | Same, for traffic out |
 | Order requests & chats | Counts per bucket, always system-wide |
 
-The per-node charts appear when more than one node is in play — with a single node they'd just repeat the chart above. Up to 8 nodes are drawn (8 distinguishable hues); beyond that the busiest 8 are shown and the subtitle says how many were left out.
+The per-node charts appear when more than one node is in play — with a single node they'd just repeat the chart above. Up to 8 nodes are drawn (8 distinguishable hues); beyond that the busiest 8 are shown and the subtitle says how many were left out. A node keeps the same colour in all four per-node charts (CPU, memory, received, sent), so it is easy to follow from one to the next.
 
 **Details worth knowing**
 
@@ -497,6 +538,8 @@ Everything lives in `.env` (see `.env.example`).
 | `CPU_QUERY`, `MEMORY_PERCENT_QUERY` | generated | Override the PromQL entirely |
 | `DISK_MOUNTPOINT` | `/` | Filesystem shown in the *Disk free* tile. The Docker Desktop demo uses `/var/lib` |
 | `DISK_AVAIL_QUERY`, `DISK_SIZE_QUERY` | generated | Override the disk PromQL |
+| `NETWORK_DEVICE_EXCLUDE` | `lo\|veth.*\|docker.*\|br-.*\|…` | Interfaces left out of throughput (regex) |
+| `NETWORK_RX_QUERY`, `NETWORK_TX_QUERY`, `NETWORK_SPEED_QUERY` | generated | Override the network PromQL |
 | `HEARTBEAT_CRON` | `* * * * *` | |
 | `HEARTBEAT_INTERVAL_MS` | 60000 | Whole minutes, must match the cron |
 | `REPORT_TIMEZONE` | `UTC` | Day/week/month grouping |
@@ -621,7 +664,7 @@ on what those requests do.
 **Are the tiles live, or loaded from the database?**
 
 Both, depending on the tile. **Order requests** and **Chats sent** are totals from the database for
-the selected From/To range. **Avg CPU**, **Avg memory** and **Disk free** are live: every Apply,
+the selected From/To range. **Avg CPU**, **Avg memory**, **Disk free** and **Bandwidth used** are live: every Apply,
 every Live tick, and every pop-up open or Refresh asks Prometheus for the current numbers through
 `/api/live`, ignoring the dates. The charts come from the database — that's where the history is.
 

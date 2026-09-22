@@ -67,6 +67,22 @@
   .tip-text code { font-size: 11.5px; }
   .tip-text .tip-note { display: block; margin-top: 6px; color: var(--muted); }
   .tip:hover .tip-text, .tip:focus-within .tip-text { visibility: visible; opacity: 1; }
+  /* In a pop-up title the icon sits after the words, so the tooltip opens to the right of it. */
+  .pop-head h2 { display: flex; align-items: center; gap: 8px; }
+  .pop-head .tip-text { left: 0; right: auto; width: 330px; font-weight: 400; }
+  /* Phones: the title wraps and the icon lands mid-screen, so pin the tooltip to the header's edges instead. */
+  @media (max-width: 600px) {
+    .pop-head { position: relative; }
+    .pop-head .tip { position: static; }
+    .pop-head .tip-text { left: 12px; right: 12px; top: calc(100% - 6px); width: auto; }
+  }
+  .tip-table { border-collapse: collapse; width: 100%; table-layout: fixed; white-space: normal; }
+  .tip-table th:first-child, .tip-table td:first-child { width: 36%; }
+  .tip-table th { text-align: left; font-weight: 600; color: var(--text-2); padding: 0 8px 6px 0; border-bottom: 1px solid var(--border); }
+  .tip-table th, .tip-table td { text-align: left; white-space: normal; } /* override the data table's nowrap */
+  .tip-table td { vertical-align: top; padding: 7px 8px 7px 0; border-bottom: 1px solid var(--grid); }
+  .tip-table tr:last-child td { border-bottom: none; padding-bottom: 0; }
+  .tip-table td:first-child { padding-right: 14px; }
   .field { display: flex; flex-direction: column; gap: 4px; }
   .field span { font-size: 12px; color: var(--text-2); }
   input, select, button { font: inherit; color: var(--text); background: var(--bg);
@@ -105,9 +121,15 @@
   .sync ul { margin: 6px 0; padding-left: 18px; }
   .sync .actions { display: flex; gap: 8px; margin-top: 8px; }
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+  /* Five tiles per row on wide screens, so Bandwidth starts a second row under them. */
+  @media (min-width: 1000px) { .kpis { grid-template-columns: repeat(5, 1fr); } }
   .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
   .kpi .label { color: var(--text-2); font-size: 12px; }
-  .kpi .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .kpi { min-width: 0; } /* let a grid cell shrink instead of pushing the page wider */
+  .kpi .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  /* Five narrower tiles per row: shrink the number a little so "5.1 Gbps/21 Gbps" stays on one line.
+     On phones (two tiles per row) it may wrap after the "/" instead. */
+  @media (min-width: 1000px) { .kpi .value { font-size: clamp(18px, 1.6vw, 24px); white-space: nowrap; } .kpi .value wbr { display: none; } }
   .kpi .sub { color: var(--muted); font-size: 12px; }
   .kpi.clickable { cursor: pointer; position: relative; transition: border-color .15s; }
   .kpi.clickable:hover, .kpi.clickable:focus-visible { border-color: var(--accent); outline: none; }
@@ -246,14 +268,30 @@
     <div class="kpi clickable" id="k-cpu-card" role="button" tabindex="0" aria-haspopup="dialog" title="Show CPU for each node, live"><span class="more">Details ›</span><div class="label" id="k-cpu-label">Avg CPU</div><div class="value" id="k-cpu">–</div><div class="sub" id="k-cpu-sub" hidden></div></div>
     <div class="kpi clickable" id="k-mem-card" role="button" tabindex="0" aria-haspopup="dialog" title="Show memory for each node, live"><span class="more">Details ›</span><div class="label" id="k-mem-label">Avg memory</div><div class="value" id="k-mem">–</div><div class="sub" id="k-mem-sub" hidden></div></div>
     <div class="kpi clickable" id="k-disk-card" role="button" tabindex="0" aria-haspopup="dialog" title="Show disk space for each node, live"><span class="more">Details ›</span><div class="label" id="k-disk-label">Disk free</div><div class="value" id="k-disk">–</div><div class="sub" id="k-disk-sub" hidden></div></div>
+    <div class="kpi clickable" id="k-net-card" role="button" tabindex="0" aria-haspopup="dialog" title="Show network bandwidth for each node, live"><span class="more">Details ›</span><div class="label" id="k-net-label">Bandwidth used</div><div class="value" id="k-net">–</div><div class="sub" id="k-net-sub" hidden></div></div>
   </section>
 
   <!-- One pop-up for the three live tiles (CPU, memory, disk). Everything in it comes from Prometheus. -->
   <dialog class="pop" id="liveDialog" aria-labelledby="liveTitle">
     <div class="pop-head">
-      <div><h2 id="liveTitle">CPU by node</h2><p id="liveMeta">–</p></div>
+      <div>
+        <h2><span id="liveTitle">CPU by node</span>
+          <!-- Shown only in the Bandwidth pop-up. -->
+          <span class="tip" id="netTip" hidden>
+            <button type="button" class="tip-icon" aria-label="What are bandwidth and throughput?" aria-describedby="netTipText">i</button>
+            <span class="tip-text" role="tooltip" id="netTipText">
+              <table class="tip-table">
+                <tr><th>Term</th><th>What it means</th></tr>
+                <tr><td><b>Bandwidth</b></td><td>The maximum the node <i>can</i> send and receive per second (each direction), e.g. 1 Gbps</td></tr>
+                <tr><td><b>Throughput</b><br />(traffic)</td><td>What's <i>actually</i> flowing right now, e.g. 120 Mbps</td></tr>
+              </table>
+            </span>
+          </span>
+        </h2>
+        <p id="liveMeta">–</p>
+      </div>
       <span class="spacer"></span>
-      <button type="button" id="liveRefresh" class="refresh-btn" aria-label="Refresh from Prometheus"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><span>Refresh</span></button>
+      <button type="button" id="liveRefresh" class="refresh-btn" autofocus aria-label="Refresh from Prometheus"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><span>Refresh</span></button>
       <button type="button" class="close" id="liveClose" aria-label="Close">×</button>
     </div>
     <div class="pop-body" id="liveBody"></div>
@@ -262,6 +300,11 @@
   <section class="grid">
     <div class="card"><h2>Server CPU (%)</h2><p id="cpu-sub">Average per bucket</p><div class="chart"><canvas id="cpuChart"></canvas></div></div>
     <div class="card"><h2>Server memory used (%)</h2><p id="mem-sub">Average per bucket</p><div class="chart"><canvas id="memChart"></canvas></div></div>
+    <div class="card wide">
+      <h2>Server network throughput</h2><p id="net-sub">Sum of the selected nodes</p>
+      <div class="legend"><span><i style="background:var(--series-1)"></i>Received (in)</span><span><i style="background:var(--series-2)"></i>Sent (out)</span></div>
+      <div class="chart"><canvas id="netChart"></canvas></div>
+    </div>
 
     <!-- Load next to traffic: the line is the server metric, the tooltip adds the orders and
          chats of the same bucket, so a peak can be read against the traffic that caused it. -->
@@ -284,6 +327,16 @@
       <div class="legend" id="memNodesLegend"></div>
       <div class="chart"><canvas id="memNodesChart"></canvas></div>
     </div>
+    <div class="card" id="rxNodesCard" hidden>
+      <h2>Network received by node</h2><p id="rx-nodes-sub">One line per node</p>
+      <div class="legend" id="rxNodesLegend"></div>
+      <div class="chart"><canvas id="rxNodesChart"></canvas></div>
+    </div>
+    <div class="card" id="txNodesCard" hidden>
+      <h2>Network sent by node</h2><p id="tx-nodes-sub">One line per node</p>
+      <div class="legend" id="txNodesLegend"></div>
+      <div class="chart"><canvas id="txNodesChart"></canvas></div>
+    </div>
 
     <div class="card wide">
       <h2>Order requests &amp; chats</h2><p id="activity-sub">Count per bucket</p>
@@ -295,7 +348,7 @@
   <details id="tableView">
     <summary>Show data table</summary>
     <div class="table-wrap"><table>
-      <thead><tr><th>Time</th><th>CPU %</th><th>CPU max %</th><th>Memory %</th><th>Memory max %</th><th>Orders</th><th>Chats</th><th>Samples</th></tr></thead>
+      <thead><tr><th>Time</th><th>CPU %</th><th>CPU max %</th><th>Memory %</th><th>Memory max %</th><th>Network in</th><th>Network out</th><th>Orders</th><th>Chats</th><th>Samples</th></tr></thead>
       <tbody id="tbody"></tbody>
     </table></div>
   </details>
@@ -392,7 +445,7 @@ async function load() {
 let liveRequestId = 0;
 let lastLive = null;        // last /api/live response (or { error })
 let lastLiveQuery = null;   // the cluster/node it was asked for, so Refresh re-asks the same thing
-let liveKind = 'cpu';       // which pop-up is showing: cpu | memory | disk
+let liveKind = 'cpu';       // which pop-up is showing: cpu | memory | disk | network
 let liveLoading = false;
 let liveBusySince = 0;      // when the Refresh icon started turning
 const MIN_SPIN_MS = 450;    // a fast answer still shows one clear turn instead of a flicker
@@ -401,6 +454,14 @@ function formatBytes(bytes) {
   if (bytes == null) return '–';
   const [value, unit] = bytes >= 1024 * GB ? [bytes / 1024 / GB, 'TB'] : [bytes / GB, 'GB'];
   return `${value.toLocaleString(undefined, { maximumFractionDigits: value < 10 ? 1 : 0 })} ${unit}`;
+}
+// Bits per second in the unit that keeps the number readable: 334 bps, 12.4 Kbps, 3.2 Mbps, 1.1 Gbps.
+function formatBps(v) {
+  if (v == null) return '—';
+  const units = ['bps', 'Kbps', 'Mbps', 'Gbps', 'Tbps'];
+  let i = 0, n = v;
+  while (n >= 1000 && i < units.length - 1) { n /= 1000; i++; }
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: n < 10 && i ? 1 : 0 })} ${units[i]}`;
 }
 const pctText = (v) => (v == null ? '–' : `${nf.format(v)}%`);
 const escapeHtml = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -412,6 +473,7 @@ async function loadLive(cluster, node) {
   $('k-cpu-label').textContent = oneNode ? 'Avg CPU' : 'Avg CPU (selected nodes)';
   $('k-mem-label').textContent = oneNode ? 'Avg memory' : 'Avg memory (selected nodes)';
   $('k-disk-label').textContent = oneNode ? 'Disk free' : 'Disk free (selected nodes)';
+  $('k-net-label').textContent = oneNode ? 'Bandwidth used' : 'Bandwidth used (selected nodes)';
   liveLoading = true;
   setRefreshBusy(true); // only the button changes while waiting; the table stays as it is
   try {
@@ -425,10 +487,15 @@ async function loadLive(cluster, node) {
     setTile('k-mem', pctText(t.memory.usage), d.nodes.length ? null : 'no nodes');
     setTile('k-disk', t.disk.sizeBytes ? `${formatBytes(t.disk.availBytes)}/${formatBytes(t.disk.sizeBytes)}` : '–',
       t.disk.sizeBytes ? null : `no disk data for ${d.mountpoint}`);
+    // Bandwidth: the busier direction now, out of the nodes' bandwidth (in and out each get the full bandwidth).
+    const net = t.network;
+    const busy = net.rxBps == null ? null : Math.max(net.rxBps, net.txBps ?? 0);
+    setTile('k-net', busy == null ? '–' : net.speedBps ? `${formatBps(busy)}/${formatBps(net.speedBps)}` : formatBps(busy),
+      busy == null ? 'no network data' : net.speedBps ? null : 'bandwidth unknown');
   } catch (err) {
     if (myRequest !== liveRequestId) return;
     lastLive = { error: err.message };
-    for (const id of ['k-cpu', 'k-mem', 'k-disk']) setTile(id, '–', 'unavailable');
+    for (const id of ['k-cpu', 'k-mem', 'k-disk', 'k-net']) setTile(id, '–', 'unavailable');
   } finally {
     if (myRequest === liveRequestId) {
       liveLoading = false;
@@ -439,17 +506,21 @@ async function loadLive(cluster, node) {
 }
 // The line under a live tile is only used for problems ("unavailable"); normally it is hidden.
 function setTile(id, value, problem) {
-  $(id).textContent = value;
+  // "5.1 Gbps/21 Gbps": allow a line break after the "/" on narrow screens (<wbr> is not part of the text).
+  $(id).innerHTML = String(value).split('/').map(escapeHtml).join('/<wbr>');
   $(`${id}-sub`).textContent = problem ?? '';
   $(`${id}-sub`).hidden = !problem;
 }
 
+// 41.7 · 0.13 (two decimals under 1%, matching the tiles) · <0.01 for traffic too small to show.
+const usagePct = (pct) => (pct > 0 && pct < 0.01 ? '<0.01'
+  : nf.format(pct < 1 ? Math.round(pct * 100) / 100 : Math.round(pct * 10) / 10));
 // Bar + number. Amber from 80%, red from 90%, with a word so it isn't colour alone.
 function usageBar(pct, word, alarm) {
   if (pct == null) return '<span class="pop-note">no data</span>';
   const level = pct >= 90 ? ' crit' : pct >= 80 ? ' warn' : '';
   return `<div class="usage${level}"><span class="bar"><i style="width:${Math.min(100, pct).toFixed(1)}%"></i></span>` +
-    `<span class="pct">${nf.format(Math.round(pct * 10) / 10)}% ${word}${pct >= 90 ? ` · ${alarm}` : ''}</span></div>`;
+    `<span class="pct">${usagePct(pct)}% ${word}${pct >= 90 ? ` · ${alarm}` : ''}</span></div>`;
 }
 
 // What each pop-up shows. cols: header cells; cells(n): row cells after the node name; total(t): Total row.
@@ -473,6 +544,19 @@ const LIVE = {
       `<td>${usageBar(t.memory.usage, 'used', 'high')}</td>`],
     note: 'Used = MemTotal − MemAvailable, so file cache the kernel can hand back is not counted. ' +
       'The Total is used bytes ÷ total bytes across the selected nodes.',
+  },
+  network: {
+    title: 'Bandwidth by node',
+    meta: (d) => `average over the last ${d.cpuWindow}`,
+    cols: ['<th class="num">Received</th>', '<th class="num">Sent</th>', '<th class="num">Bandwidth</th>', '<th>Usage</th>'],
+    cells: (n) => [`<td class="num">${formatBps(n.network.rxBps)}</td>`, `<td class="num">${formatBps(n.network.txBps)}</td>`,
+      `<td class="num">${n.network.speedBps ? formatBps(n.network.speedBps) : 'unknown'}</td>`,
+      `<td>${n.network.speedBps ? usageBar(n.network.usage, 'used', 'high') : '<span class="pop-note">bandwidth unknown</span>'}</td>`],
+    total: (t) => [`<td class="num">${formatBps(t.network.rxBps)}</td>`, `<td class="num">${formatBps(t.network.txBps)}</td>`,
+      `<td class="num">${t.network.speedBps ? formatBps(t.network.speedBps) : '–'}</td>`, `<td>${usageBar(t.network.usage, 'used', 'high')}</td>`],
+    note: 'Received and Sent are the traffic over the last minute, in bits per second. In and out each get the node\'s ' +
+      'full bandwidth, so Usage is the busier direction ÷ bandwidth — a node is maxed out when either side is. ' +
+      'The tile shows that busier direction out of the total bandwidth.',
   },
   disk: {
     title: 'Disk space by node',
@@ -512,6 +596,7 @@ function renderLiveDialog({ fresh = false } = {}) {
   const cfg = LIVE[liveKind];
   const d = lastLive;
   $('liveTitle').textContent = cfg.title;
+  $('netTip').hidden = liveKind !== 'network';
   if (!d) { $('liveMeta').textContent = 'Reading Prometheus…'; $('liveBody').innerHTML = ''; return; }
   if (d.error) {
     $('liveMeta').textContent = 'Could not read Prometheus';
@@ -553,7 +638,7 @@ function openLiveDialog(kind) {
   $('liveDialog').showModal();
   refreshLive(); // opening always shows fresh numbers
 }
-for (const [id, kind] of [['k-cpu-card', 'cpu'], ['k-mem-card', 'memory'], ['k-disk-card', 'disk']]) {
+for (const [id, kind] of [['k-cpu-card', 'cpu'], ['k-mem-card', 'memory'], ['k-disk-card', 'disk'], ['k-net-card', 'network']]) {
   $(id).addEventListener('click', () => openLiveDialog(kind));
   $(id).addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLiveDialog(kind); }
@@ -640,7 +725,7 @@ function withGaps(points, bucketMs) {
   const out = [];
   for (let i = 0; i < points.length; i++) {
     if (i && points[i].x - points[i - 1].x > bucketMs * 1.5) {
-      out.push({ x: points[i - 1].x + bucketMs, cpuUsage: null, memoryUsage: null, orders: null, chats: null, gap: true });
+      out.push({ x: points[i - 1].x + bucketMs, cpuUsage: null, memoryUsage: null, netRxBps: null, netTxBps: null, orders: null, chats: null, gap: true });
     }
     out.push(points[i]);
   }
@@ -658,6 +743,21 @@ function render(data) {
   const memOpts = baseOptions(rangeMs, '%', fromMs, toMs, data.bucket);
   memOpts.scales.y.suggestedMax = 100;
   upsertChart('mem', 'memChart', [lineDataset('Memory', pts.map((p) => ({ x: p.x, y: p.memoryUsage })), css('--series-1'))], memOpts);
+  // Network: the selection's total throughput (nodes added up), averaged over each bucket.
+  const netOpts = baseOptions(rangeMs, 'bps', fromMs, toMs, data.bucket);
+  netOpts.scales.y.ticks.callback = (v) => formatBps(v);
+  netOpts.plugins.tooltip.callbacks.label = (item) => ` ${item.dataset.label}: ${formatBps(item.parsed.y)}`;
+  netOpts.plugins.tooltip.callbacks.afterBody = (items) => {
+    const p = items[0]?.raw;
+    if (!p || p.peakRx == null || data.bucket === '1m') return '';
+    return [`Busiest minute: ${formatBps(p.peakRx)} in · ${formatBps(p.peakTx)} out`];
+  };
+  const netPts = (field) => pts.map((p) => ({ x: p.x, y: p[field], peakRx: p.netRxBpsMax, peakTx: p.netTxBpsMax }));
+  upsertChart('net', 'netChart', [
+    lineDataset('Received', netPts('netRxBps'), css('--series-1')),
+    lineDataset('Sent', netPts('netTxBps'), css('--series-2')),
+  ], netOpts);
+
   upsertChart('activity', 'activityChart', [
     lineDataset('Order requests', pts.map((p) => ({ x: p.x, y: p.orders })), css('--series-1')),
     lineDataset('Chats sent', pts.map((p) => ({ x: p.x, y: p.chats })), css('--series-2')),
@@ -687,6 +787,8 @@ function render(data) {
   $('mem-traffic-sub').textContent = `${scope} · per ${per} · hover a point for orders and chats`;
   $('cpu-sub').textContent = `${scope} · across all cores, per ${per}`;
   $('mem-sub').textContent = `${scope} · per ${per}`;
+  $('net-sub').textContent = `${describeSelection(data.totals.nodeCount, { asSum: true })} · average per ${per}` +
+    (pts.some((p) => p.netRxBps != null) ? '' : ' · no network data in this range yet');
   $('activity-sub').textContent = `Whole cluster · count per ${per}`;
 
   const t = data.totals;
@@ -707,6 +809,8 @@ function renderNodeCharts(data, rangeMs, fromMs, toMs) {
   const show = all.length > 1; // one line on its own says nothing the chart above doesn't
   $('cpuNodesCard').hidden = !show;
   $('memNodesCard').hidden = !show;
+  $('rxNodesCard').hidden = !show;
+  $('txNodesCard').hidden = !show;
   if (!show) return;
 
   const series = all.slice(0, MAX_NODE_LINES); // already sorted busiest first by the API
@@ -716,12 +820,16 @@ function renderNodeCharts(data, rangeMs, fromMs, toMs) {
   const per = data.bucketLabel ?? BUCKET_LABEL[data.bucket] ?? data.bucket;
   $('cpu-nodes-sub').textContent = `One line per node · across all cores, average per ${per}${note}`;
   $('mem-nodes-sub').textContent = `One line per node · average per ${per}${note}`;
+  $('rx-nodes-sub').textContent = `One line per node · average throughput per ${per}${note}`;
+  $('tx-nodes-sub').textContent = `One line per node · average throughput per ${per}${note}`;
 
   const colors = series.map((_, i) => css(`--series-${(i % 8) + 1}`));
   const legend = series.map((s, i) =>
     `<span><i style="background:${colors[i]}"></i>${s.node}</span>`).join('');
   $('cpuNodesLegend').innerHTML = legend;
   $('memNodesLegend').innerHTML = legend;
+  $('rxNodesLegend').innerHTML = legend; // same colour for a node in every per-node chart
+  $('txNodesLegend').innerHTML = legend;
 
   const datasets = (field) => series.map((s, i) => lineDataset(
     s.node,
@@ -737,13 +845,23 @@ function renderNodeCharts(data, rangeMs, fromMs, toMs) {
   };
   upsertChart('cpuNodes', 'cpuNodesChart', datasets('cpuUsage'), opts());
   upsertChart('memNodes', 'memNodesChart', datasets('memoryUsage'), opts());
+
+  // Network per node: bits per second with auto units, no 100% ceiling.
+  const netOpts = () => {
+    const o = baseOptions(rangeMs, 'bps', fromMs, toMs, data.bucket);
+    o.scales.y.ticks.callback = (v) => formatBps(v);
+    o.plugins.tooltip.callbacks.label = (item) => ` ${item.dataset.label}: ${formatBps(item.parsed.y)}`;
+    return o;
+  };
+  upsertChart('rxNodes', 'rxNodesChart', datasets('netRxBps'), netOpts());
+  upsertChart('txNodes', 'txNodesChart', datasets('netTxBps'), netOpts());
 }
 
 function renderTable(pts) {
   const rows = pts.filter((p) => !p.gap).slice(-500).reverse().map((p) => `<tr><td>${formatTooltipTitle(p.x, lastData?.bucket)}</td>
     <td>${p.cpuUsage ?? '—'}</td><td>${p.cpuUsageMax ?? '—'}</td><td>${p.memoryUsage ?? '—'}</td><td>${p.memoryUsageMax ?? '—'}</td>
-    <td>${nf.format(p.orders)}</td><td>${nf.format(p.chats)}</td><td>${p.samples}</td></tr>`);
-  $('tbody').innerHTML = rows.join('') || '<tr><td colspan="8">No data in this range</td></tr>';
+    <td>${formatBps(p.netRxBps)}</td><td>${formatBps(p.netTxBps)}</td><td>${nf.format(p.orders)}</td><td>${nf.format(p.chats)}</td><td>${p.samples}</td></tr>`);
+  $('tbody').innerHTML = rows.join('') || '<tr><td colspan="10">No data in this range</td></tr>';
 }
 
 // ---------- events ----------
@@ -782,12 +900,13 @@ const selectedNodesParam = () =>
   selectedNodes.size === 0 || selectedNodes.size === knownNodes.length ? 'all' : [...selectedNodes].join(',');
 
 // "3 of 5 nodes" for the status line, "Average of 3 selected nodes" above a chart.
-function describeSelection(nodeCount, { asAverage = false } = {}) {
+function describeSelection(nodeCount, { asAverage = false, asSum = false } = {}) {
   const where = appliedCluster === 'all' ? '' : ` · ${appliedCluster}`;
   if (appliedNodes.size === 1) return [...appliedNodes][0] + where;
   const n = nodeCount || appliedNodes.size || appliedKnown.length;
   const all = !appliedKnown.length || n >= appliedKnown.length;
   if (asAverage) return (all ? `Average of ${n} nodes` : `Average of ${n} selected nodes`) + where;
+  if (asSum) return (all ? `Sum of ${n} nodes` : `Sum of ${n} selected nodes`) + where;
   return (all ? `All ${n} nodes` : `${n} of ${appliedKnown.length} nodes`) + where;
 }
 

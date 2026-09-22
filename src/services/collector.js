@@ -35,6 +35,8 @@ export async function collectHeartbeat(from, to) {
     meta: { cluster: m.cluster, node: m.node },
     cpuUsage: m.cpuUsage,
     memoryUsage: m.memoryUsage,
+    netRxBps: m.netRxBps,
+    netTxBps: m.netTxBps,
     orders: null,
     chats: null,
   }));
@@ -44,6 +46,8 @@ export async function collectHeartbeat(from, to) {
     meta: { cluster: CLUSTER_NODE, node: CLUSTER_NODE },
     cpuUsage: null,
     memoryUsage: null,
+    netRxBps: null,
+    netTxBps: null,
     orders: valueOf(orders, 'orders', errors),
     chats: valueOf(chats, 'chats', errors),
   };
