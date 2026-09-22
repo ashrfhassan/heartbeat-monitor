@@ -1,7 +1,6 @@
 node_modules
 .env
 
-# runtime logs from 
-pm start, and local test screenshots
+# runtime logs from npm start, and local test screenshots
 *.log
 screenshots/

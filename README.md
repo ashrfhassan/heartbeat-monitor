@@ -3,7 +3,7 @@
 Every minute, this service records one snapshot of your system: how hard each backend node is working, and how much business went through it.
 
 ```json
-{ "datetime": "2026-09-17T14:05:00Z", "meta": { "cluster": "backend", "node": "10.0.0.12:9100" }, "cpuUsage": 71, "memoryUsage": 60 }
+{ "datetime": "2026-09-17T14:05:00Z", "meta": { "cluster": "backend", "node": "10.0.0.12:9100" }, "cpuUsage": 71.38, "memoryUsage": 60.12 }
 { "datetime": "2026-09-17T14:05:00Z", "meta": { "cluster": "__cluster__", "node": "__cluster__" }, "orders": 100, "chats": 500 }
 ```
 
@@ -134,12 +134,28 @@ So **71% means the node's cores were busy 71% of the time**, counting every proc
 node_memory_MemTotal_bytes      8422297600   (8032 MB)
 node_memory_MemAvailable_bytes  7804715008   (7443 MB)
 
-memoryUsage = 100 * (1 - MemAvailable / MemTotal) = 7.34%  → saved as 7
+memoryUsage = 100 * (1 - MemAvailable / MemTotal) = 7.34%  → saved as 7.34
 ```
 
 It uses **MemAvailable**, not MemFree. Linux fills spare RAM with file cache and releases it the moment an app needs memory; counting that as "used" would show 90%+ on a perfectly healthy server. The result matches `free -m`'s `total − available`.
 
 Unlike CPU, this is a **snapshot** at the end of the minute, not an average. Memory moves slowly, so that's fine.
+
+### Disk free
+
+```
+node_filesystem_avail_bytes{mountpoint="/"}   53687091200   (50 GB)
+node_filesystem_size_bytes{mountpoint="/"}    85899345920   (80 GB)
+
+tile: "50 GB/80 GB"   (free/total)
+```
+
+Disk space is only read live (see [the live tiles](#7-the-dashboard)); it isn't stored in the
+heartbeat records, because it changes slowly and the useful question is "how much is free right now". `avail` is the
+space a normal process can still write — the *Avail* column of `df -h` (root's reserved blocks are
+not counted as free). The filesystem is `DISK_MOUNTPOINT` (`/` by default). With several nodes
+selected the tile adds them up; click it for each
+node's numbers. Sizes use 1024-based units, the way `df -h` and Windows show them.
 
 ### Orders and chats
 
@@ -153,7 +169,7 @@ In this project both databases are simulated in `src/sources/simulatedDatabases.
 
 ### Rounding
 
-Percentages are stored as whole numbers (71.38 → 71). For one decimal, change `toPercent` in `src/services/prometheus.js`.
+Percentages are stored with two decimals (71.384 → 71.38), and the API's averages are rounded to two decimals too. Whole numbers would hide a quiet server: a 32-core machine that is 0.14% busy would be saved as `0`, which reads like a broken reading rather than an idle one. To change the precision, edit `toPercent` in `src/services/prometheus.js`.
 
 ---
 
@@ -162,7 +178,7 @@ Percentages are stored as whole numbers (71.38 → 71). For one decimal, change 
 One record per node per minute, plus one counts record per minute. A 4-node cluster writes 5 records a minute:
 
 ```json
-{ "datetime": "…T14:05:00Z", "meta": { "cluster": "backend", "node": "10.0.0.12:9100" }, "cpuUsage": 71, "memoryUsage": 60, "orders": null, "chats": null }
+{ "datetime": "…T14:05:00Z", "meta": { "cluster": "backend", "node": "10.0.0.12:9100" }, "cpuUsage": 71.38, "memoryUsage": 60.12, "orders": null, "chats": null }
 { "datetime": "…T14:05:00Z", "meta": { "cluster": "backend", "node": "10.0.0.13:9100" }, "cpuUsage": 44, "memoryUsage": 58, "orders": null, "chats": null }
 { "datetime": "…T14:05:00Z", "meta": { "cluster": "workers", "node": "10.0.1.20:9100" }, "cpuUsage": 39, "memoryUsage": 61, "orders": null, "chats": null }
 { "datetime": "…T14:05:00Z", "meta": { "cluster": "__cluster__", "node": "__cluster__" }, "cpuUsage": null, "memoryUsage": null, "orders": 100, "chats": 500 }
@@ -334,6 +350,41 @@ those records are left alone — rename them by hand if you want the history joi
 db.heartbeats.updateMany({ "meta.node": "10.0.0.12:9100" }, { $set: { "meta.node": "orders-api-1:9100" } })
 ```
 
+### `GET /api/live?cluster=backend&node=backend-1,backend-2`
+
+The **Avg CPU**, **Avg memory** and **Disk free** tiles and their pop-ups. Everything is read from
+Prometheus at the moment of the call — nothing comes from the database, and there are no dates.
+Same `cluster` and `node` filters as `/api/heartbeats`.
+
+```json
+{
+  "at": "2026-09-22T03:31:51.204Z",
+  "cpuWindow": "1m",
+  "mountpoint": "/",
+  "nodes": [
+    { "cluster": "backend", "node": "backend-1",
+      "cpu":    { "usage": 14.5, "cores": 8 },
+      "memory": { "usage": 31.25, "usedBytes": 5368709120, "totalBytes": 17179869184 },
+      "disk":   { "availBytes": 53687091200, "sizeBytes": 85899345920 } }
+  ],
+  "totals": {
+    "cpu":    { "usage": 33.6, "cores": 36 },
+    "memory": { "usage": 33.17, "usedBytes": 37580963840, "totalBytes": 111669149696 },
+    "disk":   { "availBytes": 404800667648, "sizeBytes": 816043786240 }
+  },
+  "errors": []
+}
+```
+
+- **CPU** is the average over the last `cpuWindow` (the heartbeat interval, 1 minute by default) —
+  CPU is a rate, so "right now" always means "over the last few seconds or minutes".
+- **Totals are weighted by size**, the same way for all three: CPU = busy cores ÷ all cores, memory
+  = used bytes ÷ total bytes, disk = free bytes ÷ total bytes. A 32-core node moves the total more
+  than a 4-core one. (The charts, which come from the stored records, average the nodes equally;
+  with identical nodes the two are the same.)
+- The six queries run in parallel and each settles on its own; a failed one is listed in `errors`
+  and only its fields are `null`. `502` if Prometheus can't be reached at all.
+
 ### `GET /api/heartbeats/latest?limit=60`
 
 The last N raw records, oldest first, exactly as stored.
@@ -357,6 +408,32 @@ The grouping options with the heartbeat interval and timezone; and a liveness ch
 - **Live (30s)** — re-queries on a rolling window
 - **Sync clusters** — after you move a node to another cluster in `prometheus.yml`, this shows what
   changed and updates the stored history to match, so old records follow the node
+
+**Tiles**
+
+| Tile | Source | Shows |
+|---|---|---|
+| Order requests, Chats sent | Database | Totals over the selected From/To range |
+| Avg CPU | Prometheus, live | CPU busy right now (last minute) across the applied nodes |
+| Avg memory | Prometheus, live | Memory in use right now across the applied nodes |
+| Disk free | Prometheus, live | Free/total right now, e.g. *50 GB/80 GB* |
+
+The three live tiles ignore From/To: they follow only the applied cluster and nodes, and are read
+again on every **Apply** (and every 30 s with **Live** on). With one node they show that node; with
+several, a size-weighted total (see [`/api/live`](#6-the-api)).
+
+**Click any live tile** (or focus it and press Enter) for a pop-up listing every node, grouped by
+cluster, with a *Total* row:
+
+- **CPU by node** — cores and usage
+- **Memory by node** — used, total and usage
+- **Disk space by node** — free, used, total and usage
+
+Bars turn amber at 80% and red at 90% (with *high* / *low* next to the number). Opening a pop-up
+reads Prometheus again, and its **Refresh** button re-reads it on demand — the tiles update too.
+The header says when the numbers were read. Esc, × or a click outside closes it.
+
+For CPU and memory **over time**, use the charts below the tiles — they come from the stored records.
 
 **Charts**
 
@@ -418,6 +495,8 @@ Everything lives in `.env` (see `.env.example`).
 | `DEFAULT_CLUSTER` | `default` | Used when a target has neither a `cluster` label nor a job |
 | `CPU_RATE_WINDOW` | = heartbeat | Must contain 2+ scrapes |
 | `CPU_QUERY`, `MEMORY_PERCENT_QUERY` | generated | Override the PromQL entirely |
+| `DISK_MOUNTPOINT` | `/` | Filesystem shown in the *Disk free* tile. The Docker Desktop demo uses `/var/lib` |
+| `DISK_AVAIL_QUERY`, `DISK_SIZE_QUERY` | generated | Override the disk PromQL |
 | `HEARTBEAT_CRON` | `* * * * *` | |
 | `HEARTBEAT_INTERVAL_MS` | 60000 | Whole minutes, must match the cron |
 | `REPORT_TIMEZONE` | `UTC` | Day/week/month grouping |
@@ -439,6 +518,8 @@ Everything lives in `.env` (see `.env.example`).
 | `src/services/collector.js` | The cron heartbeat: gather in parallel, insert |
 | `src/sources/simulatedDatabases.js` | Stand-in orders and chats databases — replace these |
 | `src/routes/heartbeats.js` | The API: buckets, filters, aggregations |
+| `src/routes/live.js` | Live CPU / memory / disk per node for the tiles, straight from Prometheus |
+| `src/routes/maintenance.js` | Cluster drift check and Sync clusters |
 | `public/index.html` | The dashboard |
 | `scripts/seed.js` | Historical data for real, discovered nodes |
 | `prometheus/prometheus.yml` | Scrape targets, grouped into clusters |
@@ -536,6 +617,20 @@ the 51% came from a program deliberately loading one core during that exact minu
 were unrelated on purpose: a known load at a known minute is what proves the record's window lines
 up. On a real server the two correlate, but never simply: 90 orders might cost 5% or 60% depending
 on what those requests do.
+
+**Are the tiles live, or loaded from the database?**
+
+Both, depending on the tile. **Order requests** and **Chats sent** are totals from the database for
+the selected From/To range. **Avg CPU**, **Avg memory** and **Disk free** are live: every Apply,
+every Live tick, and every pop-up open or Refresh asks Prometheus for the current numbers through
+`/api/live`, ignoring the dates. The charts come from the database — that's where the history is.
+
+**Why is disk space not saved in the records like CPU and memory?**
+
+Because it barely changes minute to minute, and what you act on is the current number — "are we
+about to run out?". So the tile asks Prometheus at the moment you Apply or Refresh. If you later
+want a disk trend chart, add `diskAvail`/`diskSize` to `getMetricsByNode` and the schema; the
+collector would then store it with every heartbeat like the others.
 
 ### Operations
 

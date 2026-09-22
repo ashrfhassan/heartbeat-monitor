@@ -107,9 +107,9 @@ router.get('/', async (req, res, next) => {
         $project: {
           _id: 0,
           datetime: '$_id',
-          cpuUsage: { $round: ['$cpuUsage', 1] }, // average over the bucket
+          cpuUsage: { $round: ['$cpuUsage', 2] }, // average over the bucket
           cpuUsageMax: 1,
-          memoryUsage: { $round: ['$memoryUsage', 1] },
+          memoryUsage: { $round: ['$memoryUsage', 2] },
           memoryUsageMax: 1,
           orders: 1,
           chats: 1,
@@ -145,8 +145,8 @@ router.get('/', async (req, res, next) => {
               points: {
                 $push: {
                   datetime: '$_id.bucket',
-                  cpuUsage: { $round: ['$cpuUsage', 1] },
-                  memoryUsage: { $round: ['$memoryUsage', 1] },
+                  cpuUsage: { $round: ['$cpuUsage', 2] },
+                  memoryUsage: { $round: ['$memoryUsage', 2] },
                 },
               },
             },
@@ -157,8 +157,8 @@ router.get('/', async (req, res, next) => {
               _id: 0,
               node: '$_id.node',
               cluster: '$_id.cluster',
-              avgCpuUsage: { $round: ['$avgCpuUsage', 1] },
-              avgMemoryUsage: { $round: ['$avgMemoryUsage', 1] },
+              avgCpuUsage: { $round: ['$avgCpuUsage', 2] },
+              avgMemoryUsage: { $round: ['$avgMemoryUsage', 2] },
               points: 1,
             },
           },
@@ -253,7 +253,7 @@ export function summarize(points) {
     if (p.cpuUsageMax != null) totals.maxCpuUsage = Math.max(totals.maxCpuUsage ?? 0, p.cpuUsageMax);
     if (p.memoryUsageMax != null) totals.maxMemoryUsage = Math.max(totals.maxMemoryUsage ?? 0, p.memoryUsageMax);
   }
-  const avg = ([sum, n]) => (n ? Math.round((sum / n) * 10) / 10 : null);
+  const avg = ([sum, n]) => (n ? Math.round((sum / n) * 100) / 100 : null);
   totals.avgCpuUsage = avg(weighted.cpu);
   totals.avgMemoryUsage = avg(weighted.memory);
   return totals;

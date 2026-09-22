@@ -26,6 +26,9 @@ if (intervalMs < 60_000 || intervalMs % 60_000 !== 0) {
 // Prometheus needs at least 2 scrapes inside the window (1m window -> the usual 15s scrape is fine).
 const rateWindow = process.env.CPU_RATE_WINDOW || `${intervalMs / 60_000}m`;
 
+// Which filesystem the "Disk free" tile reports. '/' is the root disk on a normal Linux server.
+const diskMountpoint = process.env.DISK_MOUNTPOINT || '/';
+
 export const config = {
   port: num(process.env.PORT, 3000),
   mongoUri: process.env.MONGO_URI || 'mongodb://localhost:27017/heartbeat',
@@ -42,6 +45,19 @@ export const config = {
     memoryUsage:
       process.env.MEMORY_PERCENT_QUERY ||
       `100 * (1 - node_memory_MemAvailable_bytes{${selector}} / node_memory_MemTotal_bytes{${selector}})`,
+    // Live tiles: memory in bytes and the number of cores, so the dashboard can show "used / total"
+    // and weight a multi-node average by each node's size.
+    memTotal: `node_memory_MemTotal_bytes{${selector}}`,
+    memAvailable: `node_memory_MemAvailable_bytes{${selector}}`,
+    cpuCores: `count by (instance, job, cluster) (node_cpu_seconds_total{${selector},mode="idle"})`,
+    // Disk: free and total bytes of one filesystem per server, read live (not stored).
+    // avail = free space a normal user can write (what `df` shows as "Avail").
+    diskAvail:
+      process.env.DISK_AVAIL_QUERY ||
+      `max by (instance, job, cluster) (node_filesystem_avail_bytes{${selector},mountpoint="${diskMountpoint}"})`,
+    diskSize:
+      process.env.DISK_SIZE_QUERY ||
+      `max by (instance, job, cluster) (node_filesystem_size_bytes{${selector},mountpoint="${diskMountpoint}"})`,
   },
 
   // Day/week/month grouping is done in this timezone, so a "day" is a local day, not a UTC one.
@@ -57,5 +73,6 @@ export const config = {
   cronExpression,
   intervalMs,
   rateWindow,
+  diskMountpoint,
   retentionDays: num(process.env.RETENTION_DAYS, 30),
 };

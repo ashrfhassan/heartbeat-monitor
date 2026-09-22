@@ -109,6 +109,47 @@
   .kpi .label { color: var(--text-2); font-size: 12px; }
   .kpi .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .kpi .sub { color: var(--muted); font-size: 12px; }
+  .kpi.clickable { cursor: pointer; position: relative; transition: border-color .15s; }
+  .kpi.clickable:hover, .kpi.clickable:focus-visible { border-color: var(--accent); outline: none; }
+  .kpi.clickable .more { position: absolute; top: 10px; right: 12px; color: var(--accent); font-size: 12px; }
+  .kpi.clickable .label { padding-right: 56px; }
+
+  /* Disk details pop-up */
+  dialog.pop { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text);
+    padding: 0; width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 64px); }
+  dialog.pop::backdrop { background: rgb(0 0 0 / .45); }
+  .pop-head { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px 10px; border-bottom: 1px solid var(--border); }
+  .pop-head h2 { margin: 0; font-size: 16px; }
+  .pop-head p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+  .pop-head .spacer { flex: 1; }
+  .pop-head .close { font-size: 18px; line-height: 1; padding: 4px 10px; }
+  .pop-body { padding: 6px 18px 16px; overflow: auto; overscroll-behavior: contain; max-height: calc(100vh - 160px); }
+  .pop-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .pop-table th { text-align: left; color: var(--text-2); font-weight: 500; font-size: 12px; padding: 10px 8px 6px; border-bottom: 1px solid var(--border); }
+  .pop-table td { padding: 8px; border-bottom: 1px solid var(--grid); }
+  .pop-table .num { text-align: right; white-space: nowrap; }
+  .pop-table tr.group td { color: var(--text-2); font-weight: 600; font-size: 12px; padding-top: 14px; border-bottom: none; }
+  .pop-table tfoot td { font-weight: 600; border-bottom: none; border-top: 1px solid var(--border); }
+  .usage { display: flex; align-items: center; gap: 8px; min-width: 190px; }
+  .usage .bar { flex: 1; height: 8px; border-radius: 4px; background: var(--grid); overflow: hidden; }
+  .usage .bar i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+  .usage.warn .bar i { background: var(--series-4); }
+  .usage.crit .bar i { background: var(--danger); }
+  .usage .pct { min-width: 64px; text-align: right; white-space: nowrap; }
+  @media (max-width: 600px) { .usage { min-width: 120px; } .pop-table th, .pop-table td { padding-left: 4px; padding-right: 4px; } }
+  .usage.crit .pct { color: var(--danger); font-weight: 600; }
+  .pop-table .when { color: var(--muted); font-size: 12px; margin-left: 6px; }
+  /* Refresh keeps its size and label; only the icon turns while Prometheus is being read. */
+  .refresh-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .refresh-btn svg { width: 14px; height: 14px; flex: none; }
+  .refresh-btn.loading { cursor: progress; }
+  .refresh-btn.loading svg { animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .refresh-btn.loading svg { animation: none; opacity: .5; } }
+  /* The "read at" time glows briefly after each refresh, so a refresh that changes nothing still shows it worked. */
+  .pop-head p.fresh { animation: fresh 1.2s ease-out; }
+  @keyframes fresh { from { color: var(--accent); } to { color: var(--muted); } }
+  .pop-note { color: var(--muted); font-size: 12px; margin: 12px 0 0; }
 
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; min-width: 0; }
@@ -202,9 +243,21 @@
   <section class="kpis">
     <div class="kpi"><div class="label">Order requests</div><div class="value" id="k-orders">–</div><div class="sub">total in range</div></div>
     <div class="kpi"><div class="label">Chats sent</div><div class="value" id="k-chats">–</div><div class="sub">total in range</div></div>
-    <div class="kpi"><div class="label" id="k-cpu-label">Avg CPU</div><div class="value" id="k-cpu">–</div><div class="sub" id="k-cpu-max">peak –</div></div>
-    <div class="kpi"><div class="label" id="k-mem-label">Avg memory</div><div class="value" id="k-mem">–</div><div class="sub" id="k-mem-mb">–</div></div>
+    <div class="kpi clickable" id="k-cpu-card" role="button" tabindex="0" aria-haspopup="dialog" title="Show CPU for each node, live"><span class="more">Details ›</span><div class="label" id="k-cpu-label">Avg CPU</div><div class="value" id="k-cpu">–</div><div class="sub" id="k-cpu-sub" hidden></div></div>
+    <div class="kpi clickable" id="k-mem-card" role="button" tabindex="0" aria-haspopup="dialog" title="Show memory for each node, live"><span class="more">Details ›</span><div class="label" id="k-mem-label">Avg memory</div><div class="value" id="k-mem">–</div><div class="sub" id="k-mem-sub" hidden></div></div>
+    <div class="kpi clickable" id="k-disk-card" role="button" tabindex="0" aria-haspopup="dialog" title="Show disk space for each node, live"><span class="more">Details ›</span><div class="label" id="k-disk-label">Disk free</div><div class="value" id="k-disk">–</div><div class="sub" id="k-disk-sub" hidden></div></div>
   </section>
+
+  <!-- One pop-up for the three live tiles (CPU, memory, disk). Everything in it comes from Prometheus. -->
+  <dialog class="pop" id="liveDialog" aria-labelledby="liveTitle">
+    <div class="pop-head">
+      <div><h2 id="liveTitle">CPU by node</h2><p id="liveMeta">–</p></div>
+      <span class="spacer"></span>
+      <button type="button" id="liveRefresh" class="refresh-btn" aria-label="Refresh from Prometheus"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><span>Refresh</span></button>
+      <button type="button" class="close" id="liveClose" aria-label="Close">×</button>
+    </div>
+    <div class="pop-body" id="liveBody"></div>
+  </dialog>
 
   <section class="grid">
     <div class="card"><h2>Server CPU (%)</h2><p id="cpu-sub">Average per bucket</p><div class="chart"><canvas id="cpuChart"></canvas></div></div>
@@ -314,6 +367,7 @@ async function load() {
     bucket: 'auto', tz: TZ, cluster: $('cluster').value, node: selectedNodesParam() });
   if (selectedNodes.size !== 1) params.set('perNode', '1'); // per-node charts, unless one node is selected
   setStatus('Loading…');
+  loadLive(params.get('cluster'), params.get('node')); // CPU / memory / disk tiles, live from Prometheus
   try {
     const res = await fetch(`/api/heartbeats?${params}`);
     const data = await res.json();
@@ -330,6 +384,185 @@ async function load() {
     setStatus(`Failed to load: ${err.message}`, true);
   }
 }
+
+// ---------- live tiles: CPU, memory, disk ----------
+// These three tiles are read from Prometheus at the moment you Apply (or Refresh), not from the
+// stored heartbeats, so they ignore From/To and follow only the applied cluster and nodes.
+// One /api/live call feeds all three tiles and the pop-up.
+let liveRequestId = 0;
+let lastLive = null;        // last /api/live response (or { error })
+let lastLiveQuery = null;   // the cluster/node it was asked for, so Refresh re-asks the same thing
+let liveKind = 'cpu';       // which pop-up is showing: cpu | memory | disk
+let liveLoading = false;
+let liveBusySince = 0;      // when the Refresh icon started turning
+const MIN_SPIN_MS = 450;    // a fast answer still shows one clear turn instead of a flicker
+const GB = 1024 ** 3;
+function formatBytes(bytes) {
+  if (bytes == null) return '–';
+  const [value, unit] = bytes >= 1024 * GB ? [bytes / 1024 / GB, 'TB'] : [bytes / GB, 'GB'];
+  return `${value.toLocaleString(undefined, { maximumFractionDigits: value < 10 ? 1 : 0 })} ${unit}`;
+}
+const pctText = (v) => (v == null ? '–' : `${nf.format(v)}%`);
+const escapeHtml = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+async function loadLive(cluster, node) {
+  const myRequest = ++liveRequestId;
+  lastLiveQuery = { cluster, node };
+  const oneNode = appliedNodes.size === 1;
+  $('k-cpu-label').textContent = oneNode ? 'Avg CPU' : 'Avg CPU (selected nodes)';
+  $('k-mem-label').textContent = oneNode ? 'Avg memory' : 'Avg memory (selected nodes)';
+  $('k-disk-label').textContent = oneNode ? 'Disk free' : 'Disk free (selected nodes)';
+  liveLoading = true;
+  setRefreshBusy(true); // only the button changes while waiting; the table stays as it is
+  try {
+    const res = await fetch(`/api/live?${new URLSearchParams({ cluster, node })}`);
+    const d = await res.json();
+    if (myRequest !== liveRequestId) return; // a newer request already went out
+    if (!res.ok) throw new Error(d.error || res.statusText);
+    lastLive = d;
+    const t = d.totals;
+    setTile('k-cpu', pctText(t.cpu.usage), d.nodes.length ? null : 'no nodes');
+    setTile('k-mem', pctText(t.memory.usage), d.nodes.length ? null : 'no nodes');
+    setTile('k-disk', t.disk.sizeBytes ? `${formatBytes(t.disk.availBytes)}/${formatBytes(t.disk.sizeBytes)}` : '–',
+      t.disk.sizeBytes ? null : `no disk data for ${d.mountpoint}`);
+  } catch (err) {
+    if (myRequest !== liveRequestId) return;
+    lastLive = { error: err.message };
+    for (const id of ['k-cpu', 'k-mem', 'k-disk']) setTile(id, '–', 'unavailable');
+  } finally {
+    if (myRequest === liveRequestId) {
+      liveLoading = false;
+      if ($('liveDialog').open) renderLiveDialog({ fresh: true });
+      setRefreshBusy(false);
+    }
+  }
+}
+// The line under a live tile is only used for problems ("unavailable"); normally it is hidden.
+function setTile(id, value, problem) {
+  $(id).textContent = value;
+  $(`${id}-sub`).textContent = problem ?? '';
+  $(`${id}-sub`).hidden = !problem;
+}
+
+// Bar + number. Amber from 80%, red from 90%, with a word so it isn't colour alone.
+function usageBar(pct, word, alarm) {
+  if (pct == null) return '<span class="pop-note">no data</span>';
+  const level = pct >= 90 ? ' crit' : pct >= 80 ? ' warn' : '';
+  return `<div class="usage${level}"><span class="bar"><i style="width:${Math.min(100, pct).toFixed(1)}%"></i></span>` +
+    `<span class="pct">${nf.format(Math.round(pct * 10) / 10)}% ${word}${pct >= 90 ? ` · ${alarm}` : ''}</span></div>`;
+}
+
+// What each pop-up shows. cols: header cells; cells(n): row cells after the node name; total(t): Total row.
+const LIVE = {
+  cpu: {
+    title: 'CPU by node',
+    meta: (d) => `average over the last ${d.cpuWindow}`,
+    cols: ['<th class="num">Cores</th>', '<th>Usage</th>'],
+    cells: (n) => [`<td class="num">${n.cpu.cores ?? '–'}</td>`, `<td>${usageBar(n.cpu.usage, 'busy', 'high')}</td>`],
+    total: (t) => [`<td class="num">${t.cpu.cores || '–'}</td>`, `<td>${usageBar(t.cpu.usage, 'busy', 'high')}</td>`],
+    note: 'Usage is the share of all cores that were busy, counting every process on the machine. ' +
+      'The Total is weighted by cores (busy cores ÷ all cores), so a big node counts more than a small one.',
+  },
+  memory: {
+    title: 'Memory by node',
+    meta: () => 'in use now, excluding cache',
+    cols: ['<th class="num">Used</th>', '<th class="num">Total</th>', '<th>Usage</th>'],
+    cells: (n) => [`<td class="num">${formatBytes(n.memory.usedBytes)}</td>`, `<td class="num">${formatBytes(n.memory.totalBytes)}</td>`,
+      `<td>${usageBar(n.memory.usage, 'used', 'high')}</td>`],
+    total: (t) => [`<td class="num">${formatBytes(t.memory.usedBytes)}</td>`, `<td class="num">${formatBytes(t.memory.totalBytes)}</td>`,
+      `<td>${usageBar(t.memory.usage, 'used', 'high')}</td>`],
+    note: 'Used = MemTotal − MemAvailable, so file cache the kernel can hand back is not counted. ' +
+      'The Total is used bytes ÷ total bytes across the selected nodes.',
+  },
+  disk: {
+    title: 'Disk space by node',
+    meta: (d) => `filesystem ${d.mountpoint}`,
+    cols: ['<th class="num">Free</th>', '<th class="num">Used</th>', '<th class="num">Total</th>', '<th>Usage</th>'],
+    cells: (n) => {
+      const { availBytes: a, sizeBytes: z } = n.disk;
+      return [`<td class="num">${formatBytes(a)}</td>`, `<td class="num">${z == null ? '–' : formatBytes(z - a)}</td>`,
+        `<td class="num">${formatBytes(z)}</td>`, `<td>${usageBar(z ? (1 - a / z) * 100 : null, 'used', 'low')}</td>`];
+    },
+    total: (t) => {
+      const { availBytes: a, sizeBytes: z } = t.disk;
+      return [`<td class="num">${formatBytes(a)}</td>`, `<td class="num">${formatBytes(z - a)}</td>`,
+        `<td class="num">${formatBytes(z)}</td>`, `<td>${usageBar(z ? (1 - a / z) * 100 : null, 'used', 'low')}</td>`];
+    },
+    note: 'Free = space programs can still write (the <em>Avail</em> column of <code>df -h</code>).',
+  },
+};
+
+// Spin the icon without changing the button's size or label, and without disabling it
+// (disabling would grey it out and drop keyboard focus). Clicks while busy are ignored.
+let spinTimer = null;
+function setRefreshBusy(busy) {
+  const btn = $('liveRefresh');
+  clearTimeout(spinTimer);
+  if (busy) {
+    liveBusySince = Date.now();
+    btn.classList.add('loading');
+    btn.setAttribute('aria-busy', 'true');
+    return;
+  }
+  const wait = Math.max(0, MIN_SPIN_MS - (Date.now() - liveBusySince));
+  spinTimer = setTimeout(() => { btn.classList.remove('loading'); btn.removeAttribute('aria-busy'); }, wait);
+}
+
+function renderLiveDialog({ fresh = false } = {}) {
+  const cfg = LIVE[liveKind];
+  const d = lastLive;
+  $('liveTitle').textContent = cfg.title;
+  if (!d) { $('liveMeta').textContent = 'Reading Prometheus…'; $('liveBody').innerHTML = ''; return; }
+  if (d.error) {
+    $('liveMeta').textContent = 'Could not read Prometheus';
+    $('liveBody').innerHTML = `<p class="pop-note">${escapeHtml(d.error)}</p>`;
+    return;
+  }
+  const count = `${d.nodes.length} node${d.nodes.length === 1 ? '' : 's'}`;
+  $('liveMeta').textContent = `Live from Prometheus · read ${new Date(d.at).toLocaleTimeString([], CLOCK_FMT)} · ${count} · ${cfg.meta(d)}`;
+  if (!d.nodes.length) {
+    $('liveBody').innerHTML = '<p class="pop-note">No node matches the applied cluster and nodes.</p>';
+    return;
+  }
+  const colspan = cfg.cols.length + 1;
+  const clusters = [...new Set(d.nodes.map((n) => n.cluster))];
+  const body = clusters.map((c) => (clusters.length > 1 ? `<tr class="group"><td colspan="${colspan}">${escapeHtml(c)}</td></tr>` : '') +
+    d.nodes.filter((n) => n.cluster === c).map((n) => `<tr><td>${escapeHtml(n.node)}</td>${cfg.cells(n).join('')}</tr>`).join('')).join('');
+  const foot = d.nodes.length > 1 ? `<tfoot><tr><td>Total</td>${cfg.total(d.totals).join('')}</tr></tfoot>` : '';
+  const warn = d.errors?.length ? `<p class="pop-note">Some metrics could not be read: ${escapeHtml(d.errors.join('; '))}</p>` : '';
+  const scroll = $('liveBody').scrollTop; // keep the reader's place when the numbers are replaced
+  $('liveBody').innerHTML = `<table class="pop-table"><thead><tr><th>Node</th>${cfg.cols.join('')}</tr></thead>` +
+    `<tbody>${body}</tbody>${foot}</table>${warn}` +
+    `<p class="pop-note">${cfg.note} Bars turn amber at 80% and red at 90%.</p>`;
+  $('liveBody').scrollTop = scroll;
+  if (fresh) { // restart the glow on the "read at" line
+    $('liveMeta').classList.remove('fresh');
+    void $('liveMeta').offsetWidth;
+    $('liveMeta').classList.add('fresh');
+  }
+}
+function refreshLive() {
+  // One read at a time: a click while a request is in flight is ignored. Once the answer is in,
+  // a click always reads again, even while the icon finishes its turn.
+  if (liveLoading || !lastLiveQuery) return;
+  loadLive(lastLiveQuery.cluster, lastLiveQuery.node);
+}
+function openLiveDialog(kind) {
+  liveKind = kind;
+  renderLiveDialog();
+  $('liveDialog').showModal();
+  refreshLive(); // opening always shows fresh numbers
+}
+for (const [id, kind] of [['k-cpu-card', 'cpu'], ['k-mem-card', 'memory'], ['k-disk-card', 'disk']]) {
+  $(id).addEventListener('click', () => openLiveDialog(kind));
+  $(id).addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLiveDialog(kind); }
+  });
+}
+$('liveRefresh').addEventListener('click', refreshLive);
+$('liveClose').addEventListener('click', () => $('liveDialog').close());
+// Clicking the dark backdrop (outside the box) closes it too; Esc is built into <dialog>.
+$('liveDialog').addEventListener('click', (e) => { if (e.target === $('liveDialog')) $('liveDialog').close(); });
 
 function setStatus(text, isError = false) {
   $('status').textContent = text;
@@ -359,7 +592,8 @@ function baseOptions(rangeMs, yTitle, fromMs, toMs, bucket) {
         padding: 10, boxPadding: 4, usePointStyle: true,
         callbacks: {
           title: (items) => formatTooltipTitle(items[0].parsed.x, bucket),
-          label: (item) => ` ${item.dataset.label}: ${item.parsed.y == null ? '—' : nf.format(item.parsed.y)}`,
+          // Percentage charts get a % after every value; the orders/chats chart shows plain counts.
+          label: (item) => ` ${item.dataset.label}: ${item.parsed.y == null ? '—' : nf.format(item.parsed.y) + (yTitle === '%' ? '%' : '')}`,
         },
       },
     },
@@ -420,10 +654,10 @@ function render(data) {
 
   const cpuOpts = baseOptions(rangeMs, '%', fromMs, toMs, data.bucket);
   cpuOpts.scales.y.suggestedMax = 100;
-  upsertChart('cpu', 'cpuChart', [lineDataset('CPU %', pts.map((p) => ({ x: p.x, y: p.cpuUsage })), css('--series-1'))], cpuOpts);
+  upsertChart('cpu', 'cpuChart', [lineDataset('CPU', pts.map((p) => ({ x: p.x, y: p.cpuUsage })), css('--series-1'))], cpuOpts);
   const memOpts = baseOptions(rangeMs, '%', fromMs, toMs, data.bucket);
   memOpts.scales.y.suggestedMax = 100;
-  upsertChart('mem', 'memChart', [lineDataset('Memory %', pts.map((p) => ({ x: p.x, y: p.memoryUsage })), css('--series-1'))], memOpts);
+  upsertChart('mem', 'memChart', [lineDataset('Memory', pts.map((p) => ({ x: p.x, y: p.memoryUsage })), css('--series-1'))], memOpts);
   upsertChart('activity', 'activityChart', [
     lineDataset('Order requests', pts.map((p) => ({ x: p.x, y: p.orders })), css('--series-1')),
     lineDataset('Chats sent', pts.map((p) => ({ x: p.x, y: p.chats })), css('--series-2')),
@@ -458,13 +692,7 @@ function render(data) {
   const t = data.totals;
   $('k-orders').textContent = nf.format(t.orders);
   $('k-chats').textContent = nf.format(t.chats);
-  const oneNode = appliedNodes.size === 1;
-  $('k-cpu-label').textContent = oneNode ? 'Avg CPU' : 'Avg CPU (selected nodes)';
-  $('k-mem-label').textContent = oneNode ? 'Avg memory' : 'Avg memory (selected nodes)';
-  $('k-cpu').textContent = t.avgCpuUsage == null ? '–' : `${t.avgCpuUsage}%`;
-  $('k-cpu-max').textContent = `peak ${t.maxCpuUsage == null ? '–' : t.maxCpuUsage + '%'}`;
-  $('k-mem').textContent = t.avgMemoryUsage == null ? '–' : `${t.avgMemoryUsage}%`;
-  $('k-mem-mb').textContent = `peak ${t.maxMemoryUsage == null ? '–' : t.maxMemoryUsage + '%'}`;
+  // CPU, memory and disk tiles are live (loadLive), not from these stored totals.
 
   renderNodeCharts(data, rangeMs, fromMs, toMs);
 
@@ -647,13 +875,14 @@ $('nodeButton').addEventListener('click', () => {
   $('nodeButton').setAttribute('aria-expanded', String(open));
 });
 $('nodeAll').addEventListener('change', () => {
-  const on = $('nodeAll').checked;
+  // "All nodes" always means every node: ticking it selects them all, and unticking it can't leave
+  // an empty selection (that would also mean all), so it snaps back to ticked with every box ticked.
   selectedNodes.clear();
+  knownNodes.forEach((n) => selectedNodes.add(n));
   for (const cb of document.querySelectorAll('#nodeList input')) {
-    cb.checked = on;
-    if (on && cb.value) selectedNodes.add(cb.value);
+    cb.checked = true;
+    cb.indeterminate = false;
   }
-  if (!on) knownNodes.forEach((n) => selectedNodes.add(n)); // unchecking "All" means all again
   updateNodeButton();
   markDirty();
 });

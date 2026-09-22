@@ -34,8 +34,9 @@ function toNumber(raw) {
   return Number.isFinite(value) ? value : null;
 }
 
-// Percentages are saved as whole numbers (71.38 -> 71). Change to 1 decimal: Math.round(v * 10) / 10
-const toPercent = (v) => (v == null ? null : Math.min(100, Math.max(0, Math.round(v))));
+// Percentages are saved with 2 decimals (71.384 -> 71.38). Whole numbers would hide a quiet server:
+// a 32-core machine at 0.14% busy would be saved as 0, which looks like "no data" rather than "idle".
+const toPercent = (v) => (v == null ? null : Math.min(100, Math.max(0, Math.round(v * 100) / 100)));
 
 /**
  * Fetches CPU % and memory % for every node of every cluster, for one heartbeat.
@@ -66,4 +67,42 @@ export async function getMetricsByNode(at) {
   collect(memory, 'memoryUsage', 'memory');
 
   return { nodes, errors };
+}
+
+/**
+ * Everything the live tiles need, read from Prometheus right now (nothing comes from the database):
+ * CPU % (averaged over the last CPU_RATE_WINDOW, 1 minute by default), cores, memory used / total bytes,
+ * and disk free / total bytes, per node. The queries run in parallel and each settles on its own,
+ * so a missing disk metric does not blank the CPU tile.
+ */
+export async function getLiveByNode(at = new Date()) {
+  const q = config.queries;
+  const names = ['cpu', 'cores', 'memTotal', 'memAvailable', 'diskAvail', 'diskSize'];
+  const settled = await Promise.allSettled([q.cpuUsage, q.cpuCores, q.memTotal, q.memAvailable, q.diskAvail, q.diskSize]
+    .map((promql) => queryPrometheus(promql, at)));
+
+  const errors = [];
+  const nodes = new Map();
+  settled.forEach((s, i) => {
+    if (s.status === 'rejected') { errors.push(`${names[i]}: ${s.reason?.message ?? s.reason}`); return; }
+    for (const { cluster, node, value } of s.value) {
+      const key = `${cluster}/${node}`;
+      const entry = nodes.get(key) ?? { cluster, node, raw: {} };
+      entry.raw[names[i]] = value;
+      nodes.set(key, entry);
+    }
+  });
+
+  const list = [...nodes.values()].map(({ cluster, node, raw }) => ({
+    cluster,
+    node,
+    cpu: { usage: toPercent(raw.cpu ?? null), cores: raw.cores ?? null },
+    memory: {
+      usage: raw.memTotal && raw.memAvailable != null ? toPercent(100 * (1 - raw.memAvailable / raw.memTotal)) : null,
+      usedBytes: raw.memTotal && raw.memAvailable != null ? raw.memTotal - raw.memAvailable : null,
+      totalBytes: raw.memTotal ?? null,
+    },
+    disk: { availBytes: raw.diskAvail ?? null, sizeBytes: raw.diskSize ?? null },
+  }));
+  return { nodes: list, errors };
 }

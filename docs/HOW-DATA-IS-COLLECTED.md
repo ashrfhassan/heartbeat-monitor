@@ -89,7 +89,7 @@ It returns a single number:
 }
 ```
 
-The collector takes `71.38` and saves it as `71`. Memory works the same way with this query:
+The collector saves `71.38` as is (two decimals). Memory works the same way with this query:
 
 ```
 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
@@ -129,8 +129,8 @@ The collector runs ②, the memory query and the two ③ counts **in parallel**,
 ```json
 {
   "datetime": "2026-09-17T14:05:00.000Z",
-  "cpuUsage": 71,
-  "memoryUsage": 60,
+  "cpuUsage": 71.38,
+  "memoryUsage": 60.12,
   "orders": 100,
   "chats": 500
 }
@@ -149,12 +149,12 @@ If one source fails, only that field is saved as `null`, and the rest of the rec
 14:05:45       │
 14:06:00.000  ─┘  cron fires for window [14:05:00, 14:06:00)
    │
-   ├─► Prometheus: CPU rate over [1m] at 14:06:00      → 71.38 → 71
+   ├─► Prometheus: CPU rate over [1m] at 14:06:00      → 71.38
    ├─► Prometheus: memory at 14:06:00                  → 60.12 → 60
    ├─► orders DB: count in [14:05:00, 14:06:00)        → 100
    ├─► chats DB:  count in [14:05:00, 14:06:00)        → 500
    │
-   └─► MongoDB insert { datetime: 14:05:00, cpuUsage: 71, memoryUsage: 60, orders: 100, chats: 500 }
+   └─► MongoDB insert { datetime: 14:05:00, cpuUsage: 71.38, memoryUsage: 60.12, orders: 100, chats: 500 }
        (about 20–50 ms after 14:06:00, then the next minute starts)
 ```
 
