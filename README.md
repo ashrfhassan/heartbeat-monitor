@@ -1,5 +1,12 @@
 # Heartbeat monitor
 
+> **Moved (2026-09-30).** This service now lives inside the main codebase:
+> backend module `codebase/backend/src/modules/monitoring` (docs: `backend/docs/monitoring.md`),
+> dashboard page `/monitoring` (`codebase/dashboard/app/forms/monitoring`), and the Prometheus
+> configuration in `codebase/devops/infrastructure_setup/monitoring/ansible/deploy.yml`.
+> See `IMPLEMENTATION-PLAN.md` for the migration. This repo is kept as the reference implementation.
+
+
 Every minute, this service records one snapshot of your system: how hard each backend node is working, and how much business went through it.
 
 ```json
